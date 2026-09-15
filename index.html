@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" id="thishtml">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>&ZeroWidthSpace;</title>
-  <link rel="icon" sizes="any" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Cpath d='M224 387.814V512L32 320l192-192v126.912C447.375 260.152 437.794 103.016 380.93 0 521.287 151.707 491.48 394.785 224 387.814z'/%3E%3C/svg%3E">
+  <link rel="icon" sizes="any" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' />">
   <script>
 /* Immediately create a blob URL of the current HTML and navigate to it,
    unless the page is already inside an iframe or already a blob URL. */
@@ -12,7 +12,7 @@
   if (window.self !== window.top) return;      // **do nothing if in an iframe**
   if (location.protocol === 'blob:') return;   // avoid infinite reload loop
 
-  const html = document.documentElement.outerHTML;
+  const html = document.getElementById('thishtml').innerHTML;
   const blob = new Blob([html], { type: 'text/html' });
   const blobUrl = URL.createObjectURL(blob);
 
