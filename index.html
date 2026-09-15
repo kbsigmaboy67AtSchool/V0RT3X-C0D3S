@@ -12,7 +12,58 @@
   if (window.self !== window.top) return;      // **do nothing if in an iframe**
   if (location.protocol === 'blob:') return;   // avoid infinite reload loop
 
-  const html = document.getElementById('thishtml').innerHTML;
+  const html = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>V0RT3X Chat</title>
+  <style>
+    body {
+      margin: 0;
+      background: #000;
+      color: #fff;
+      font-family: system-ui, sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+    }
+    #s { opacity: 0.6; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <div id="s">Loading V0RT3X…</div>
+  <script>
+    // Short loader — always loads the official client
+    // Host this file anywhere. Update the GitHub client → everyone gets it.
+    (async () => {
+      const URLS = [
+        "https://kbsigmaboy67atschool.github.io/V0RT3X-C0D3S/index.html",
+        "https://raw.githubusercontent.com/kbsigmaboy67AtSchool/V0RT3X-C0D3S/main/index.html",
+        "https://cdn.jsdelivr.net/gh/kbsigmaboy67AtSchool/V0RT3X-C0D3S@main/index.html",
+      ];
+      const status = document.getElementById("s");
+      for (const url of URLS) {
+        try {
+          status.textContent = "Fetching…";
+          const res = await fetch(url + "?t=" + Date.now(), { cache: "no-store" });
+          if (!res.ok) throw new Error(res.status);
+          const html = await res.text();
+          document.open();
+          document.write(html);
+          document.close();
+          return;
+        } catch (e) {
+          console.warn("Failed", url, e);
+        }
+      }
+      status.textContent = "Could not load V0RT3X. Check network / repo.";
+    })();
+  <\/script>
+<\/body>
+<\/html>`;
   const blob = new Blob([html], { type: 'text/html' });
   const blobUrl = URL.createObjectURL(blob);
 
