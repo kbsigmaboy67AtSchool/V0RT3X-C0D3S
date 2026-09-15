@@ -180,6 +180,21 @@
     .mode-tag{font-size:.68rem;color:var(--voice);padding:2px 8px;border:1px solid var(--voice);border-radius:999px}
 
     #fileInput,#folderInput{display:none}
+    
+    .msg.deleted-local{opacity:0.35;font-style:italic}
+    .msg .edited-tag{font-size:0.62rem;color:#666;margin-left:6px}
+    #msgMenu{display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:60;align-items:center;justify-content:center}
+    #msgMenu.on{display:flex}
+    #msgMenuBox{background:#111;border:2px solid #fff;border-radius:16px;padding:16px 18px;width:min(360px,92%);max-height:85vh;overflow:auto;display:flex;flex-direction:column;gap:8px}
+    #msgMenuBox h3{font-size:0.95rem;margin-bottom:4px}
+    #msgMenuBox .menu-actions{display:flex;flex-direction:column;gap:6px}
+    #msgMenuBox .menu-actions .btn{width:100%;justify-content:flex-start}
+    #msgPreview{background:#0a0a0a;border:1px solid #333;border-radius:12px;padding:12px;max-height:40vh;overflow:auto;font-size:0.9rem;margin:6px 0}
+    #msgPreview.large{font-size:1.25rem;max-height:60vh}
+    #editArea{display:none;flex-direction:column;gap:8px}
+    #editArea.on{display:flex}
+    #editArea textarea{min-height:90px}
+
     #receiptModal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:50;align-items:center;justify-content:center}
     #receiptModal.on{display:flex}
     #receiptBox{background:#111;border:2px solid #fff;border-radius:16px;padding:18px 20px;max-width:90%;width:320px;max-height:70vh;overflow:auto}
@@ -276,6 +291,19 @@
       </div>
     </section>
   </main>
+  
+  <div id="msgMenu"><div id="msgMenuBox">
+    <h3>Message</h3>
+    <div id="msgPreview"></div>
+    <div class="menu-actions" id="msgMenuActions"></div>
+    <div id="editArea">
+      <textarea id="editInput" placeholder="Edit message…"></textarea>
+      <button class="btn" id="editSaveBtn">Save edit</button>
+      <button class="btn btn-danger" id="editCancelBtn">Cancel edit</button>
+    </div>
+    <button class="btn" id="msgMenuClose" style="width:100%;margin-top:4px">Close</button>
+  </div></div>
+
   <div id="receiptModal"><div id="receiptBox">
     <h3>Read by</h3>
     <ul id="receiptList"></ul>
@@ -308,6 +336,8 @@ const els={
   attachBtn:$("attachBtn"),folderBtn:$("folderBtn"),fileInput:$("fileInput"),folderInput:$("folderInput"),
   emojiBtn:$("emojiBtn"),emojiPanel:$("emojiPanel"),modeTag:$("modeTag"),monacoHost:$("monacoHost"),
   receiptModal:$("receiptModal"),receiptList:$("receiptList"),receiptClose:$("receiptClose"),
+  msgMenu:$("msgMenu"),msgMenuBox:$("msgMenuBox"),msgPreview:$("msgPreview"),msgMenuActions:$("msgMenuActions"),msgMenuClose:$("msgMenuClose"),
+  editArea:$("editArea"),editInput:$("editInput"),editSaveBtn:$("editSaveBtn"),editCancelBtn:$("editCancelBtn"),
   loginGate:$("loginGate"),loginUser:$("loginUser"),loginPass:$("loginPass"),
   loginBtn:$("loginBtn"),loginCancel:$("loginCancel"),loginHint:$("loginHint"),
 };
@@ -324,6 +354,8 @@ let monacoLoading=false;
 let acl={enabled:false,guests:true,accounts:{},guestPerms:{read:true,write:false,voice:false,files:false}};
 let myPerms={read:true,write:true,voice:true,files:true},accountName=null;
 const online=new Map(),receipts=new Map();
+const msgStore=new Map();
+const UNSEND_MS=5*60*1000;
 let inVoice=false,muted=false,localStream=null;
 const peers=new Map();
 const rtcConfig={iceServers:[{urls:"stun:stun.l.google.com:19302"},{urls:"stun:stun1.l.google.com:19302"}]};
@@ -431,40 +463,200 @@ function renderMarkdown(raw){
 }
 
 
-function addMessage({type="other",user,ipid,text,time,fileHtml,mid,isHtml}){
+function addMessage({type="other",user,ipid,text,time,fileHtml,mid,isHtml,senderId,ts}){
   const div=document.createElement("div");div.className="msg "+type;if(mid)div.dataset.mid=mid;
-  if(type==="system")div.textContent=text;
+  if(type==="system"){ div.textContent=text; }
   else{
     const meta=document.createElement("div");meta.className="meta";
-    meta.innerHTML=`<span class="user">${esc(user||"?")}</span>${ipid?`<span class="ipid">${esc(ipid)}</span>`:""}<span>${time||""}</span>`;
+    meta.innerHTML=`<span class="user">${esc(user||"?")}</span>${ipid?`<span class="ipid">${esc(ipid)}</span>`:""}<span>${time||""}</span><span class="edited-tag" data-edited style="display:none">(edited)</span>`;
     div.appendChild(meta);
+    const bodyWrap=document.createElement("div");
+    bodyWrap.className="msg-body-wrap";
     if(text){
       const htmlMsg=!!isHtml || (typeof text==="string" && text.trimStart().startsWith("<"));
       if(htmlMsg){
-        const wrap=document.createElement("div");
         const iframe=document.createElement("iframe");
         iframe.className="html-frame";
-        // No allow-same-origin: unique opaque origin — cannot touch parent
         iframe.setAttribute("sandbox","allow-scripts allow-forms allow-pointer-lock allow-popups allow-modals allow-fullscreen allow-presentation");
         iframe.setAttribute("allow","fullscreen");
         iframe.srcdoc=text;
-        wrap.appendChild(iframe);
-        div.appendChild(wrap);
+        bodyWrap.appendChild(iframe);
       } else {
         const b=document.createElement("div");
         b.className="md-body";
         b.innerHTML=typeof renderMarkdown==="function"?renderMarkdown(text):esc(text);
-        div.appendChild(b);
+        bodyWrap.appendChild(b);
       }
     }
-    if(fileHtml){const w=document.createElement("div");w.innerHTML=fileHtml;div.appendChild(w);}
-    if(mid){const r=document.createElement("div");r.className="reads";r.dataset.mid=mid;div.appendChild(r);div.addEventListener("click",()=>showReceipts(mid));}
+    if(fileHtml){const w=document.createElement("div");w.innerHTML=fileHtml;bodyWrap.appendChild(w);}
+    div.appendChild(bodyWrap);
+    if(mid){
+      const r=document.createElement("div");r.className="reads";r.dataset.mid=mid;div.appendChild(r);
+      div.addEventListener("click",e=>{
+        if(e.target.closest("a,button,input,textarea")) return;
+        openMsgMenu(mid);
+      });
+      const sid=senderId||(type==="own"?myId:null);
+      msgStore.set(mid,{
+        text:text||"", isHtml:!!isHtml, senderId:sid, senderName:user||"?",
+        ts:ts||Date.now(), history:[], el:div, fileHtml:fileHtml||null, type
+      });
+    }
   }
   els.messages.appendChild(div);els.messages.scrollTop=els.messages.scrollHeight;
+  return div;
 }
+function renderMsgBody(el, text, isHtml){
+  const wrap=el.querySelector(".msg-body-wrap");
+  if(!wrap) return;
+  wrap.innerHTML="";
+  if(isHtml || (text||"").trimStart().startsWith("<")){
+    const iframe=document.createElement("iframe");
+    iframe.className="html-frame";
+    iframe.setAttribute("sandbox","allow-scripts allow-forms allow-pointer-lock allow-popups allow-modals allow-fullscreen allow-presentation");
+    iframe.setAttribute("allow","fullscreen");
+    iframe.srcdoc=text;
+    wrap.appendChild(iframe);
+  } else {
+    const b=document.createElement("div");
+    b.className="md-body";
+    b.innerHTML=typeof renderMarkdown==="function"?renderMarkdown(text):esc(text);
+    wrap.appendChild(b);
+  }
+}
+function openMsgMenu(mid){
+  const m=msgStore.get(mid);
+  if(!m || !m.el || m.el.classList.contains("deleted-local")) return;
+  window._menuMid=mid;
+  els.editArea.classList.remove("on");
+  els.msgPreview.classList.remove("large");
+  // preview
+  if(m.isHtml || (m.text||"").trimStart().startsWith("<")){
+    els.msgPreview.innerHTML="";
+    const ifr=document.createElement("iframe");
+    ifr.className="html-frame";
+    ifr.style.minHeight="80px";
+    ifr.setAttribute("sandbox","allow-scripts allow-forms allow-fullscreen");
+    ifr.srcdoc=m.text;
+    els.msgPreview.appendChild(ifr);
+  } else {
+    els.msgPreview.innerHTML=typeof renderMarkdown==="function"?renderMarkdown(m.text):esc(m.text);
+  }
+  const mine=m.senderId===myId;
+  const recent=mine && (Date.now()-(m.ts||0) < UNSEND_MS);
+  const acts=[];
+  acts.push({label:"View larger", fn:"enlarge"});
+  acts.push({label:"Read receipts", fn:"receipts"});
+  if(m.history && m.history.length) acts.push({label:"Edit history ("+m.history.length+")", fn:"history"});
+  acts.push({label:"Delete for me", fn:"deleteLocal"});
+  if(mine && recent){
+    acts.push({label:"Edit message", fn:"edit"});
+    acts.push({label:"Unsend for everyone", fn:"unsend"});
+  } else if(mine){
+    acts.push({label:"Edit window expired", fn:"noop", disabled:true});
+  }
+  els.msgMenuActions.innerHTML="";
+  for(const a of acts){
+    const b=document.createElement("button");
+    b.className="btn"+(a.fn==="unsend"||a.fn==="deleteLocal"?" btn-danger":"");
+    b.textContent=a.label;
+    if(a.disabled) b.disabled=true;
+    b.onclick=()=>msgMenuAction(a.fn);
+    els.msgMenuActions.appendChild(b);
+  }
+  els.msgMenu.classList.add("on");
+}
+function msgMenuAction(fn){
+  const mid=window._menuMid;
+  const m=msgStore.get(mid);
+  if(!m) return;
+  if(fn==="enlarge"){
+    els.msgPreview.classList.toggle("large");
+    return;
+  }
+  if(fn==="receipts"){
+    showReceipts(mid);
+    return;
+  }
+  if(fn==="history"){
+    const lines=(m.history||[]).map((h,i)=>`<li>#${i+1} · ${new Date(h.ts).toLocaleString()}<br>${esc(h.text).slice(0,200)}</li>`).join("")||"<li>No edits</li>";
+    els.msgPreview.innerHTML="<strong>Edit history</strong><ul style='margin-top:8px'>"+lines+"</ul>";
+    return;
+  }
+  if(fn==="deleteLocal"){
+    deleteLocal(mid);
+    els.msgMenu.classList.remove("on");
+    return;
+  }
+  if(fn==="unsend"){
+    unsendMessage(mid);
+    els.msgMenu.classList.remove("on");
+    return;
+  }
+  if(fn==="edit"){
+    els.editArea.classList.add("on");
+    els.editInput.value=m.text;
+    els.editInput.focus();
+    return;
+  }
+}
+function deleteLocal(mid){
+  const m=msgStore.get(mid);
+  if(!m||!m.el) return;
+  m.el.classList.add("deleted-local");
+  const wrap=m.el.querySelector(".msg-body-wrap");
+  if(wrap) wrap.innerHTML="<em style='color:#666'>Deleted for you</em>";
+  m.localDeleted=true;
+}
+async function unsendMessage(mid){
+  const m=msgStore.get(mid);
+  if(!m||m.senderId!==myId) return;
+  if(Date.now()-(m.ts||0) > UNSEND_MS){ addMessage({type:"system",text:"Unsend window expired (5 min)."}); return; }
+  sendRaw({t:"unsend",mid,id:myId,u:myName});
+  applyUnsend(mid, myName);
+}
+function applyUnsend(mid, by){
+  const m=msgStore.get(mid);
+  if(!m||!m.el) return;
+  m.text=""; m.unsent=true;
+  const wrap=m.el.querySelector(".msg-body-wrap");
+  if(wrap) wrap.innerHTML="<em style='color:#666'>"+esc(by||"Someone")+" unsent a message</em>";
+  const tag=m.el.querySelector("[data-edited]");
+  if(tag){ tag.style.display=""; tag.textContent="(unsent)"; }
+}
+async function saveEdit(){
+  const mid=window._menuMid;
+  const m=msgStore.get(mid);
+  if(!m||m.senderId!==myId) return;
+  if(Date.now()-(m.ts||0) > UNSEND_MS){ addMessage({type:"system",text:"Edit window expired (5 min)."}); return; }
+  const newText=els.editInput.value;
+  if(newText===m.text) return;
+  m.history.push({text:m.text, ts:Date.now()});
+  const isHtml=newText.trimStart().startsWith("<");
+  const cipher=await encryptText(newText);
+  sendRaw({t:"edit",mid,id:myId,u:myName,c:cipher,html:!!isHtml,ts:Date.now()});
+  applyEdit(mid, newText, isHtml, true);
+  els.editArea.classList.remove("on");
+  els.msgMenu.classList.remove("on");
+}
+function applyEdit(mid, newText, isHtml, fromSelf){
+  const m=msgStore.get(mid);
+  if(!m||!m.el) return;
+  if(!fromSelf && m.text) m.history.push({text:m.text, ts:Date.now()});
+  m.text=newText; m.isHtml=!!isHtml;
+  renderMsgBody(m.el, newText, isHtml);
+  const tag=m.el.querySelector("[data-edited]");
+  if(tag){ tag.style.display=""; tag.textContent="(edited)"; }
+}
+
 function updateReadLabel(mid){const list=receipts.get(mid)||[];const el=els.messages.querySelector(`.reads[data-mid="${mid}"]`);if(el)el.textContent=list.length?`Read by ${list.length}`:"";}
 function showReceipts(mid){const list=receipts.get(mid)||[];els.receiptList.innerHTML=list.length?list.map(r=>`<li><strong>${esc(r.u)}</strong> · ${new Date(r.ts).toLocaleString()}</li>`).join(""):"<li>No receipts yet</li>";els.receiptModal.classList.add("on");}
 els.receiptClose.onclick=()=>els.receiptModal.classList.remove("on");
+if(els.msgMenuClose) els.msgMenuClose.onclick=()=>els.msgMenu.classList.remove("on");
+if(els.msgMenu) els.msgMenu.onclick=e=>{ if(e.target===els.msgMenu) els.msgMenu.classList.remove("on"); };
+if(els.editSaveBtn) els.editSaveBtn.onclick=()=>saveEdit();
+if(els.editCancelBtn) els.editCancelBtn.onclick=()=>els.editArea.classList.remove("on");
+
 
 function updateVoicePeersUI(){
   const frag=document.createDocumentFragment();
@@ -618,7 +810,7 @@ function connect(){
         if(!roomSettings.text||!can("read"))return;
         const plain=await decryptText(data.c);if(plain===null)return;
         const mid=data.mid||null;
-        addMessage({type:data.id===myId?"own":"other",user:data.u||"?",ipid:data.ipId||"",text:plain,time:data.ts?new Date(data.ts).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}):nowTime(),mid,isHtml:!!data.html||plain.trimStart().startsWith("<")});
+        addMessage({type:data.id===myId?"own":"other",user:data.u||"?",ipid:data.ipId||"",text:plain,time:data.ts?new Date(data.ts).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}):nowTime(),mid,isHtml:!!data.html||plain.trimStart().startsWith("<"),senderId:data.id,ts:data.ts||Date.now()});
         if(mid&&data.id!==myId&&can("read"))sendRaw({t:"read",mid,id:myId,u:myName,ts:Date.now()});return;
       }
       if(data.t==="read"&&data.mid&&data.id!==myId){
@@ -628,6 +820,16 @@ function connect(){
       if(data.t==="file"&&data.c&&data.id!==myId){
         if(!roomSettings.files||!can("read"))return;
         try{const plain=await decryptText(data.c);if(!plain)return;const obj=JSON.parse(plain);showFile(data.u||"?",obj.name,obj.mime,b64dec(obj.b64),false,data.ipId);}catch(e){console.warn(e);}return;
+      }
+      if(data.t==="unsend"&&data.mid){
+        if(data.id!==myId) applyUnsend(data.mid, data.u||"Someone");
+        return;
+      }
+      if(data.t==="edit"&&data.mid&&data.c&&data.id!==myId){
+        const plain=await decryptText(data.c);
+        if(plain===null) return;
+        applyEdit(data.mid, plain, !!data.html || plain.trimStart().startsWith("<"), false);
+        return;
       }
       if(data.t==="signal"&&data.id!==myId){handleSignal(data);return;}
       if(data.t==="voice-leave"&&data.id!==myId){removePeer(data.id);return;}
@@ -656,7 +858,7 @@ async function sendMessage(){
   const mid=(typeof uuid==="function"?uuid():(crypto.randomUUID?crypto.randomUUID():String(Math.random()))).slice(0,12);
   const isHtml=text.trimStart().startsWith("<");
   sendRaw({t:"msg",mid,u:myName,id:myId,ipId:myIpId,ts:Date.now(),c:await encryptText(text),html:!!isHtml});
-  addMessage({type:"own",user:myName,ipid:myIpId||"",text,time:nowTime(),mid,isHtml});
+  addMessage({type:"own",user:myName,ipid:myIpId||"",text,time:nowTime(),mid,isHtml,senderId:myId,ts:Date.now()});
   receipts.set(mid,[]);
   setComposerText("");
   if(htmlMode) exitHtmlMode();
