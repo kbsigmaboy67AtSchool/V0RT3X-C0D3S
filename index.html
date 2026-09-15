@@ -165,6 +165,20 @@
     .compose{padding:12px 16px;border-top:2px solid var(--border);background:var(--surface);display:flex;gap:8px;align-items:center}
     .compose input[type=text]{flex:1;padding:11px 13px}
     .compose .btn{padding:11px 14px;white-space:nowrap}
+
+    .compose{flex-wrap:wrap;align-items:flex-end}
+    .compose-tools{display:flex;gap:6px;align-items:center;width:100%;order:-1;margin-bottom:4px}
+    #msgInput{flex:1;min-height:42px;max-height:140px;resize:vertical;padding:10px 12px;line-height:1.35}
+    #monacoHost{display:none;flex:1;height:160px;border:2px solid #333;border-radius:var(--radius);overflow:hidden}
+    #monacoHost.on{display:block}
+    #msgInput.html-hidden{display:none}
+    .emoji-panel{display:none;position:absolute;bottom:70px;left:12px;right:12px;max-width:420px;max-height:220px;overflow:auto;background:#111;border:2px solid #fff;border-radius:14px;padding:10px;z-index:30;flex-wrap:wrap;gap:4px}
+    .emoji-panel.on{display:flex}
+    .emoji-panel button{background:transparent;border:none;font-size:1.35rem;cursor:pointer;padding:4px;border-radius:8px;line-height:1}
+    .emoji-panel button:hover{background:#222}
+    .msg .html-frame{width:100%;min-height:120px;max-height:360px;border:1px solid #333;border-radius:10px;background:#0a0a0a;margin-top:6px}
+    .mode-tag{font-size:.68rem;color:var(--voice);padding:2px 8px;border:1px solid var(--voice);border-radius:999px}
+
     #fileInput,#folderInput{display:none}
     #receiptModal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:50;align-items:center;justify-content:center}
     #receiptModal.on{display:flex}
@@ -246,12 +260,18 @@
     </aside>
     <section class="chat">
       <div class="messages" id="messages"></div>
-      <div class="compose">
-        <button class="btn btn-icon" id="attachBtn" disabled title="Upload file"><span class="material-symbols-outlined">attach_file</span></button>
-        <button class="btn btn-icon" id="folderBtn" disabled title="Upload folder"><span class="material-symbols-outlined">folder_open</span></button>
-        <input type="file" id="fileInput" multiple />
-        <input type="file" id="folderInput" webkitdirectory multiple />
-        <input type="text" id="msgInput" placeholder="Message… (paste images)" disabled autocomplete="off" />
+      <div class="compose" style="position:relative">
+        <div class="compose-tools">
+          <button class="btn btn-icon" id="attachBtn" disabled title="Upload file"><span class="material-symbols-outlined">attach_file</span></button>
+          <button class="btn btn-icon" id="folderBtn" disabled title="Upload folder"><span class="material-symbols-outlined">folder_open</span></button>
+          <button class="btn btn-icon" id="emojiBtn" disabled title="Emoji">😀</button>
+          <span class="mode-tag" id="modeTag">text</span>
+          <input type="file" id="fileInput" multiple />
+          <input type="file" id="folderInput" webkitdirectory multiple />
+        </div>
+        <div id="emojiPanel" class="emoji-panel"></div>
+        <textarea id="msgInput" placeholder="Message… Enter send · Shift+Enter newline · starts with &lt; = HTML" disabled autocomplete="off" rows="2"></textarea>
+        <div id="monacoHost"></div>
         <button class="btn" id="sendBtn" disabled><span class="material-symbols-outlined">send</span></button>
       </div>
     </section>
@@ -272,6 +292,9 @@
     <button class="btn btn-danger" id="loginCancel" style="width:100%">Cancel</button>
   </div></div>
 <script>
+function uuid(){if(crypto.randomUUID)try{return crypto.randomUUID();}catch(_){}
+  const b=new Uint8Array(16);(crypto.getRandomValues||function(a){for(let i=0;i<a.length;i++)a[i]=Math.random()*256|0;})(b);
+  b[6]=(b[6]&0x0f)|0x40;b[8]=(b[8]&0x3f)|0x80;return [...b].map(x=>x.toString(16).padStart(2,"0")).join("");}
 const $=id=>document.getElementById(id);
 const els={
   username:$("username"),relay:$("relay"),passphrase:$("passphrase"),
@@ -283,6 +306,7 @@ const els={
   setText:$("setText"),setVoice:$("setVoice"),setFiles:$("setFiles"),applySettingsBtn:$("applySettingsBtn"),
   aclEnabled:$("aclEnabled"),aclGuests:$("aclGuests"),aclText:$("aclText"),applyAclBtn:$("applyAclBtn"),
   attachBtn:$("attachBtn"),folderBtn:$("folderBtn"),fileInput:$("fileInput"),folderInput:$("folderInput"),
+  emojiBtn:$("emojiBtn"),emojiPanel:$("emojiPanel"),modeTag:$("modeTag"),monacoHost:$("monacoHost"),
   receiptModal:$("receiptModal"),receiptList:$("receiptList"),receiptClose:$("receiptClose"),
   loginGate:$("loginGate"),loginUser:$("loginUser"),loginPass:$("loginPass"),
   loginBtn:$("loginBtn"),loginCancel:$("loginCancel"),loginHint:$("loginHint"),
@@ -292,6 +316,11 @@ let ws=null,aesKey=null,connected=false,authed=false;
 let myId=crypto.randomUUID().slice(0,8),myIpId=null,mySid=null;
 let currentRoomKey="",myName="user";
 let roomSettings={text:true,voice:true,files:true};
+let roomCreatorId=null; // only this id may change settings/ACL
+let htmlMode=false;
+let monacoEditor=null;
+let monacoLoading=false;
+
 let acl={enabled:false,guests:true,accounts:{},guestPerms:{read:true,write:false,voice:false,files:false}};
 let myPerms={read:true,write:true,voice:true,files:true},accountName=null;
 const online=new Map(),receipts=new Map();
@@ -402,14 +431,32 @@ function renderMarkdown(raw){
 }
 
 
-function addMessage({type="other",user,ipid,text,time,fileHtml,mid}){
+function addMessage({type="other",user,ipid,text,time,fileHtml,mid,isHtml}){
   const div=document.createElement("div");div.className="msg "+type;if(mid)div.dataset.mid=mid;
   if(type==="system")div.textContent=text;
   else{
     const meta=document.createElement("div");meta.className="meta";
     meta.innerHTML=`<span class="user">${esc(user||"?")}</span>${ipid?`<span class="ipid">${esc(ipid)}</span>`:""}<span>${time||""}</span>`;
     div.appendChild(meta);
-    if(text){const b=document.createElement("div");b.className="md-body";b.innerHTML=renderMarkdown(text);div.appendChild(b);}
+    if(text){
+      const htmlMsg=!!isHtml || (typeof text==="string" && text.trimStart().startsWith("<"));
+      if(htmlMsg){
+        const wrap=document.createElement("div");
+        const iframe=document.createElement("iframe");
+        iframe.className="html-frame";
+        // No allow-same-origin: unique opaque origin — cannot touch parent
+        iframe.setAttribute("sandbox","allow-scripts allow-forms allow-pointer-lock allow-popups allow-modals allow-fullscreen allow-presentation");
+        iframe.setAttribute("allow","fullscreen");
+        iframe.srcdoc=text;
+        wrap.appendChild(iframe);
+        div.appendChild(wrap);
+      } else {
+        const b=document.createElement("div");
+        b.className="md-body";
+        b.innerHTML=typeof renderMarkdown==="function"?renderMarkdown(text):esc(text);
+        div.appendChild(b);
+      }
+    }
     if(fileHtml){const w=document.createElement("div");w.innerHTML=fileHtml;div.appendChild(w);}
     if(mid){const r=document.createElement("div");r.className="reads";r.dataset.mid=mid;div.appendChild(r);div.addEventListener("click",()=>showReceipts(mid));}
   }
@@ -439,12 +486,19 @@ function setVoiceUI(){
   els.voiceMuteBtn.classList.toggle("active",muted);updateVoicePeersUI();
   setStatus(connected?(inVoice?"connected · voice on":"connected · encrypted"):"disconnected",connected,!!aesKey,inVoice);
 }
+function isRoomCreator(){ return !!roomCreatorId && roomCreatorId===myId; }
 function applySettingsToUI(){
   els.setText.checked=roomSettings.text;els.setVoice.checked=roomSettings.voice;els.setFiles.checked=roomSettings.files;
   const canText=connected&&authed&&roomSettings.text&&can("write");
   const canFiles=connected&&authed&&roomSettings.files&&can("files");
   els.msgInput.disabled=!canText;els.sendBtn.disabled=!canText;
   els.attachBtn.disabled=!canFiles;els.folderBtn.disabled=!canFiles;
+  if(els.emojiBtn) els.emojiBtn.disabled=!canText;
+  const creatorOk=connected&&authed&&isRoomCreator();
+  els.applySettingsBtn.disabled=!creatorOk;
+  els.applyAclBtn.disabled=!creatorOk;
+  els.setText.disabled=!creatorOk;els.setVoice.disabled=!creatorOk;els.setFiles.disabled=!creatorOk;
+  els.aclEnabled.disabled=!creatorOk;els.aclGuests.disabled=!creatorOk;els.aclText.disabled=!creatorOk;
   if(!(roomSettings.voice&&can("voice"))&&inVoice)leaveVoice(false);
   setVoiceUI();
 }
@@ -477,11 +531,19 @@ function parseAclText(text){
 }
 async function finishAuth(){
   authed=true;els.loginGate.classList.remove("on");
-  online.set(myId,{u:myName,ipId:myIpId});applySettingsToUI();
+  online.set(myId,{u:myName,ipId:myIpId});
+  if(!roomCreatorId){
+    roomCreatorId=myId;
+    sendRaw({t:"creator",id:myId});
+    addMessage({type:"system",text:"You are the room creator (settings locked to you)."});
+  }
+  applySettingsToUI();
   addMessage({type:"system",text:"Joined as "+(accountName||myName)+(myIpId?" · "+myIpId:"")});
   sendRaw({t:"join",u:myName,id:myId,ipId:myIpId,account:accountName});
-  sendRaw({t:"settings",id:myId,settings:roomSettings});
-  if(acl.enabled)sendRaw({t:"acl",id:myId,acl});
+  if(isRoomCreator()){
+    sendRaw({t:"settings",id:myId,settings:roomSettings});
+    if(acl.enabled) sendRaw({t:"acl",id:myId,acl});
+  }
 }
 async function tryLogin(){
   const user=(els.loginUser.value||"").trim(),pass=els.loginPass.value||"";
@@ -522,6 +584,8 @@ function connect(){
         setTimeout(()=>openLoginGate(),400);return;
       }
       if(data.t==="acl"&&data.acl&&data.id!==myId){
+        if(roomCreatorId && data.id!==roomCreatorId) return;
+        if(!roomCreatorId) roomCreatorId=data.id;
         acl={...acl,...data.acl};if(data.acl.accounts)acl.accounts=data.acl.accounts;
         els.aclEnabled.checked=!!acl.enabled;els.aclGuests.checked=!!acl.guests;
         if(!authed&&connected)openLoginGate();return;
@@ -531,18 +595,30 @@ function connect(){
         online.set(data.id,{u:data.u||"?",ipId:data.ipId||null});
         addMessage({type:"system",text:(data.u||"someone")+" joined"});
         if(inVoice&&data.id)ensurePeer(data.id,data.u||"?",true);
-        if(acl.enabled)sendRaw({t:"acl",id:myId,acl});
-        sendRaw({t:"settings",id:myId,settings:roomSettings});return;
+        if(isRoomCreator()){
+          sendRaw({t:"creator",id:myId});
+          sendRaw({t:"settings",id:myId,settings:roomSettings});
+          if(acl.enabled) sendRaw({t:"acl",id:myId,acl});
+        }
+        return;
+      }
+      if(data.t==="creator"&&data.id){
+        if(!roomCreatorId) roomCreatorId=data.id;
+        // first wins; later claims ignored
+        applySettingsToUI();
+        return;
       }
       if(data.t==="settings"&&data.settings&&data.id!==myId){
+        if(roomCreatorId && data.id!==roomCreatorId) return; // ignore non-creator
+        if(!roomCreatorId) roomCreatorId=data.id;
         roomSettings={...roomSettings,...data.settings};applySettingsToUI();
-        addMessage({type:"system",text:"Room settings updated"});return;
+        addMessage({type:"system",text:"Room settings updated by creator"});return;
       }
       if(data.t==="msg"&&data.c){
         if(!roomSettings.text||!can("read"))return;
         const plain=await decryptText(data.c);if(plain===null)return;
         const mid=data.mid||null;
-        addMessage({type:data.id===myId?"own":"other",user:data.u||"?",ipid:data.ipId||"",text:plain,time:data.ts?new Date(data.ts).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}):nowTime(),mid});
+        addMessage({type:data.id===myId?"own":"other",user:data.u||"?",ipid:data.ipId||"",text:plain,time:data.ts?new Date(data.ts).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}):nowTime(),mid,isHtml:!!data.html||plain.trimStart().startsWith("<")});
         if(mid&&data.id!==myId&&can("read"))sendRaw({t:"read",mid,id:myId,u:myName,ts:Date.now()});return;
       }
       if(data.t==="read"&&data.mid&&data.id!==myId){
@@ -558,7 +634,7 @@ function connect(){
       if(data.t==="voice-join"&&data.id!==myId){if(inVoice)ensurePeer(data.id,data.u||"?",true);}
     };
     ws.onclose=()=>{
-      connected=false;authed=false;leaveVoice(true);aesKey=null;myIpId=null;online.clear();
+      connected=false;authed=false;leaveVoice(true);aesKey=null;myIpId=null;roomCreatorId=null;online.clear();
       els.connectBtn.disabled=false;els.disconnectBtn.disabled=true;els.applySettingsBtn.disabled=true;els.applyAclBtn.disabled=true;
       els.loginGate.classList.remove("on");els.myIdLine.textContent="hash: —";applySettingsToUI();setStatus("disconnected",false,false,false);
       addMessage({type:"system",text:"Disconnected"});
@@ -576,11 +652,15 @@ function disconnect(){leaveVoice(true);if(ws){ws.close();ws=null;}}
 
 async function sendMessage(){
   if(!can("write")||!roomSettings.text||!aesKey||!connected||!authed)return;
-  const text=els.msgInput.value.trim();if(!text)return;
-  const mid=crypto.randomUUID().slice(0,12);
-  sendRaw({t:"msg",mid,u:myName,id:myId,ipId:myIpId,ts:Date.now(),c:await encryptText(text)});
-  addMessage({type:"own",user:myName,ipid:myIpId||"",text,time:nowTime(),mid});receipts.set(mid,[]);
-  els.msgInput.value="";els.msgInput.focus();
+  const text=getComposerText().trim();if(!text)return;
+  const mid=(typeof uuid==="function"?uuid():(crypto.randomUUID?crypto.randomUUID():String(Math.random()))).slice(0,12);
+  const isHtml=text.trimStart().startsWith("<");
+  sendRaw({t:"msg",mid,u:myName,id:myId,ipId:myIpId,ts:Date.now(),c:await encryptText(text),html:!!isHtml});
+  addMessage({type:"own",user:myName,ipid:myIpId||"",text,time:nowTime(),mid,isHtml});
+  receipts.set(mid,[]);
+  setComposerText("");
+  if(htmlMode) exitHtmlMode();
+  els.msgInput.focus();
 }
 function showFile(user,name,mime,bytes,isOwn,ipid){
   const blob=new Blob([bytes],{type:mime||"application/octet-stream"});const url=URL.createObjectURL(blob);
@@ -707,12 +787,127 @@ function removePeer(id){
   peers.delete(id);updateVoicePeersUI();
 }
 
+
+// ── Emoji (Unicode only — no Chrome picker / license issues) ──
+const EMOJIS="😀😁😂🤣😃😄😅😆😉😊😋😎😍😘🥰😗🙂🤗🤩🤔🤨😐😑😶🙄😏😣😥😮🤐😯😪😫🥱😴😌😛😜😝🤤😒😓😔😕🙃🤑😲🙁😖😞😟😤😢😭😦😧😨😩🤯😬😰😱🥵🥶😳🤪😵😠😡🤬😷🤒🤕🤢🤮🤧😇🥳🥺🤡🤠😈💀👻👽🤖💩🔥✨⭐🌟💯🎉👍👎👏🙌👋🤝✌️🤞🤟💪❤️🧡💛💚💙💜🖤🤍💔💕💖💗💘".split(/(?:)/u).filter(x=>x.trim());
+function buildEmojiPanel(){
+  if(!els.emojiPanel||els.emojiPanel.childNodes.length) return;
+  for(const em of EMOJIS){
+    const b=document.createElement("button");
+    b.type="button"; b.textContent=em;
+    b.onclick=()=>{
+      if(htmlMode&&monacoEditor){
+        const sel=monacoEditor.getSelection();
+        monacoEditor.executeEdits("",[{range:sel,text:em,forceMoveMarkers:true}]);
+        monacoEditor.focus();
+      } else {
+        const ta=els.msgInput;
+        const start=ta.selectionStart, end=ta.selectionEnd;
+        ta.value=ta.value.slice(0,start)+em+ta.value.slice(end);
+        ta.selectionStart=ta.selectionEnd=start+em.length;
+        ta.focus(); onComposerInput();
+      }
+      els.emojiPanel.classList.remove("on");
+    };
+    els.emojiPanel.appendChild(b);
+  }
+}
+if(els.emojiBtn){
+  els.emojiBtn.onclick=()=>{
+    buildEmojiPanel();
+    els.emojiPanel.classList.toggle("on");
+  };
+  document.addEventListener("click",e=>{
+    if(!els.emojiPanel.contains(e.target)&&e.target!==els.emojiBtn) els.emojiPanel.classList.remove("on");
+  });
+}
+
+function getComposerText(){
+  if(htmlMode&&monacoEditor) return monacoEditor.getValue();
+  return els.msgInput.value;
+}
+function setComposerText(v){
+  els.msgInput.value=v;
+  if(monacoEditor) monacoEditor.setValue(v);
+}
+function onComposerInput(){
+  const v=els.msgInput.value;
+  const wantHtml=v.trimStart().startsWith("<");
+  if(wantHtml&&!htmlMode) enterHtmlMode();
+  else if(!wantHtml&&htmlMode) exitHtmlMode();
+}
+function enterHtmlMode(){
+  htmlMode=true;
+  if(els.modeTag) els.modeTag.textContent="HTML";
+  els.msgInput.classList.add("html-hidden");
+  els.monacoHost.classList.add("on");
+  loadMonaco().then(()=>{
+    if(!monacoEditor){
+      monacoEditor=monaco.editor.create(els.monacoHost,{
+        value:els.msgInput.value,
+        language:"html",
+        theme:"vs-dark",
+        minimap:{enabled:false},
+        fontSize:13,
+        wordWrap:"on",
+        automaticLayout:true,
+        lineNumbers:"off",
+      });
+      monacoEditor.onDidChangeModelContent(()=>{
+        const v=monacoEditor.getValue();
+        els.msgInput.value=v;
+        if(!v.trimStart().startsWith("<")) exitHtmlMode();
+      });
+    } else {
+      monacoEditor.setValue(els.msgInput.value);
+    }
+    monacoEditor.focus();
+  }).catch(err=>{
+    console.warn("Monaco failed, staying on textarea", err);
+    // keep textarea visible as fallback
+    els.msgInput.classList.remove("html-hidden");
+    els.monacoHost.classList.remove("on");
+    if(els.modeTag) els.modeTag.textContent="HTML (plain)";
+  });
+}
+function exitHtmlMode(){
+  htmlMode=false;
+  if(els.modeTag) els.modeTag.textContent="text";
+  if(monacoEditor) els.msgInput.value=monacoEditor.getValue();
+  els.msgInput.classList.remove("html-hidden");
+  els.monacoHost.classList.remove("on");
+  els.msgInput.focus();
+}
+function loadMonaco(){
+  if(window.monaco) return Promise.resolve();
+  if(monacoLoading) return monacoLoading;
+  monacoLoading=new Promise((resolve,reject)=>{
+    const loader=document.createElement("script");
+    loader.src="https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs/loader.js";
+    loader.onload=()=>{
+      require.config({paths:{vs:"https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs"}});
+      require(["vs/editor/editor.main"],()=>resolve(),reject);
+    };
+    loader.onerror=reject;
+    document.head.appendChild(loader);
+  });
+  return monacoLoading;
+}
+
+// patch sendMessage to use getComposerText + HTML flag
+const _sendMessageOrig=typeof sendMessage==="function"?sendMessage:null;
+
 els.connectBtn.onclick=connect;els.disconnectBtn.onclick=disconnect;
 els.sendBtn.onclick=sendMessage;
-els.msgInput.onkeydown=e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();sendMessage();}};
+els.msgInput.onkeydown=e=>{
+  if(e.key==="Enter"&&!e.shiftKey){ e.preventDefault(); sendMessage(); }
+};
+els.msgInput.addEventListener("input", onComposerInput);
+
 els.voiceJoinBtn.onclick=joinVoice;els.voiceLeaveBtn.onclick=()=>leaveVoice(false);els.voiceMuteBtn.onclick=toggleMute;
-els.applySettingsBtn.onclick=()=>{roomSettings={text:els.setText.checked,voice:els.setVoice.checked,files:els.setFiles.checked};sendRaw({t:"settings",id:myId,settings:roomSettings});applySettingsToUI();addMessage({type:"system",text:"Settings applied"});};
+els.applySettingsBtn.onclick=()=>{if(!isRoomCreator()){addMessage({type:"system",text:"Only the room creator can change settings."});return;}roomSettings={text:els.setText.checked,voice:els.setVoice.checked,files:els.setFiles.checked};sendRaw({t:"settings",id:myId,settings:roomSettings});applySettingsToUI();addMessage({type:"system",text:"Settings applied"});};
 els.applyAclBtn.onclick=()=>{
+  if(!isRoomCreator()){addMessage({type:"system",text:"Only the room creator can change accounts."});return;}
   const accounts=parseAclText(els.aclText.value);
   acl={enabled:els.aclEnabled.checked,guests:els.aclGuests.checked,accounts,guestPerms:{read:true,write:false,voice:false,files:false}};
   sendRaw({t:"acl",id:myId,acl});
