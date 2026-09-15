@@ -3,7 +3,23 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>V0RT3X Chat</title>
+  <title>&ZeroWidthSpace;</title>
+  <link rel="icon" sizes="any" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Cpath d='M224 387.814V512L32 320l192-192v126.912C447.375 260.152 437.794 103.016 380.93 0 521.287 151.707 491.48 394.785 224 387.814z'/%3E%3C/svg%3E">
+  <script>
+/* Immediately create a blob URL of the current HTML and navigate to it,
+   unless the page is already inside an iframe or already a blob URL. */
+(function () {
+  if (window.self !== window.top) return;      // **do nothing if in an iframe**
+  if (location.protocol === 'blob:') return;   // avoid infinite reload loop
+
+  const html = document.documentElement.outerHTML;
+  const blob = new Blob([html], { type: 'text/html' });
+  const blobUrl = URL.createObjectURL(blob);
+
+  // Replace current document with the Blob URL (no back entry)
+  location.replace(blobUrl);
+})();
+</script>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0&icon_names=mic,mic_off,attach_file,folder_open,send,lock,person" />
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
