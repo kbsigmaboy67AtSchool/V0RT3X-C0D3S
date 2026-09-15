@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>V0RT3X Chat</title>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0&icon_names=mic,mic_off,attach_file,folder_open,send,lock,person" />
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
   <style>
     :root {
       --bg:#000; --surface:#0d0d0d; --surface2:#161616; --text:#fff;
@@ -74,6 +76,24 @@
     .msg .file-card{margin-top:6px;padding:8px 10px;background:rgba(255,255,255,.06);border-radius:10px;border:1px solid #333;display:flex;align-items:center;gap:10px}
     .msg .file-card img{max-width:220px;max-height:180px;border-radius:8px;display:block}
     .msg .file-card a{color:#7eb6ff;text-decoration:none;font-size:.85rem}
+
+    .msg .md-body{line-height:1.5}
+    .msg .md-body p{margin:0.25em 0}
+    .msg .md-body p:first-child{margin-top:0}
+    .msg .md-body p:last-child{margin-bottom:0}
+    .msg .md-body h1,.msg .md-body h2,.msg .md-body h3,.msg .md-body h4{margin:0.4em 0 0.2em;font-weight:700;text-shadow:0 0 6px rgba(255,255,255,0.2)}
+    .msg .md-body h1{font-size:1.25em}.msg .md-body h2{font-size:1.12em}.msg .md-body h3{font-size:1.02em}
+    .msg .md-body ul,.msg .md-body ol{margin:0.3em 0 0.3em 1.2em}
+    .msg .md-body code{background:#1a1a1a;border:1px solid #333;border-radius:5px;padding:1px 5px;font-size:0.85em}
+    .msg .md-body pre{background:#0a0a0a;border:1px solid #333;border-radius:10px;padding:10px;overflow-x:auto;margin:0.4em 0}
+    .msg .md-body pre code{background:none;border:none;padding:0}
+    .msg .md-body blockquote{border-left:3px solid #555;margin:0.4em 0;padding:0.2em 0.8em;color:#aaa}
+    .msg .md-body a{color:#7eb6ff}
+    .msg .md-body img{max-width:100%;border-radius:8px;margin:0.3em 0}
+    .msg .md-body table{border-collapse:collapse;margin:0.4em 0;font-size:0.88em}
+    .msg .md-body th,.msg .md-body td{border:1px solid #444;padding:4px 8px}
+    .msg .md-body hr{border:none;border-top:1px solid #333;margin:0.6em 0}
+    .msg .md-body .md2{display:inline}
     .compose{padding:12px 16px;border-top:2px solid var(--border);background:var(--surface);display:flex;gap:8px;align-items:center}
     .compose input[type=text]{flex:1;padding:11px 13px}
     .compose .btn{padding:11px 14px;white-space:nowrap}
@@ -238,6 +258,82 @@ function ipTaken(ipId,exceptId){if(!ipId)return false;for(const[id,o]of online)i
 function claimUsername(wanted){const taken=new Set([...online.values()].map(x=>x.u.toLowerCase()));let name=(wanted||"anon").slice(0,24);if(!taken.has(name.toLowerCase()))return name;for(let i=2;i<100;i++){const n=(wanted+i).slice(0,24);if(!taken.has(n.toLowerCase()))return n;}return name+"-"+myId.slice(0,4);}
 function can(action){if(!acl.enabled)return true;return!!myPerms[action];}
 
+
+// ── Markdown 2.0 ─────────────────────────────────────────────
+const SAFE_CSS_PROPS = new Set([
+  "color","background","background-color","font-size","font-weight","font-style",
+  "text-decoration","text-shadow","letter-spacing","opacity","border","border-radius",
+  "padding","margin","display","filter","transform"
+]);
+function sanitizeCssDecl(decl){
+  const out=[];
+  for(const part of String(decl).split(";")){
+    const i=part.indexOf(":");
+    if(i<0) continue;
+    const prop=part.slice(0,i).trim().toLowerCase();
+    let val=part.slice(i+1).trim();
+    if(!SAFE_CSS_PROPS.has(prop)) continue;
+    if(/expression|url\s*\(|@import|javascript:/i.test(val)) continue;
+    out.push(prop+":"+val);
+  }
+  return out.join(";");
+}
+function parseMd2(raw){
+  const styles={}; // id -> css
+  let body=String(raw||"");
+  // [css:X] prop:val; ...
+  body=body.replace(/^\[css:([A-Za-z0-9])\]\s*(.+)$/gm,(_,id,css)=>{
+    styles[id]=sanitizeCssDecl(css);
+    return "";
+  });
+  // @css X { ... }
+  body=body.replace(/^@css\s+([A-Za-z0-9])\s*\{([^}]*)\}/gm,(_,id,css)=>{
+    styles[id]=sanitizeCssDecl(css);
+    return "";
+  });
+  return {body:body.trim(), styles};
+}
+function renderMarkdown(raw){
+  const {body, styles}=parseMd2(raw);
+  const parts=[];
+  let i=0;
+  // Custom: [;(id)(markdown content):]
+  const replaced=body.replace(/\[;\(([A-Za-z0-9])\)\(([\s\S]*?)\):\]/g,(_,id,inner)=>{
+    const key="%%MD2"+i+"%%";
+    parts.push({key,id,inner});
+    i++;
+    return key;
+  });
+  let html;
+  try{
+    if(typeof marked!=="undefined"){
+      marked.setOptions({gfm:true,breaks:true});
+      html=marked.parse(replaced);
+    } else {
+      html=esc(replaced).replace(/\n/g,"<br>");
+    }
+  }catch(e){
+    html=esc(replaced).replace(/\n/g,"<br>");
+  }
+  for(const part of parts){
+    let innerHtml;
+    try{
+      innerHtml=(typeof marked!=="undefined")?marked.parseInline(part.inner):esc(part.inner);
+    }catch(_){ innerHtml=esc(part.inner); }
+    const css=styles[part.id]||"";
+    const span='<span class="md2 md2-'+esc(part.id)+'" style="'+css+'">'+innerHtml+'</span>';
+    html=html.split(part.key).join(span);
+  }
+  if(typeof DOMPurify!=="undefined"){
+    html=DOMPurify.sanitize(html,{
+      USE_PROFILES:{html:true},
+      ADD_ATTR:["style","class","target","rel"],
+    });
+  }
+  return html;
+}
+
+
 function addMessage({type="other",user,ipid,text,time,fileHtml,mid}){
   const div=document.createElement("div");div.className="msg "+type;if(mid)div.dataset.mid=mid;
   if(type==="system")div.textContent=text;
@@ -245,7 +341,7 @@ function addMessage({type="other",user,ipid,text,time,fileHtml,mid}){
     const meta=document.createElement("div");meta.className="meta";
     meta.innerHTML=`<span class="user">${esc(user||"?")}</span>${ipid?`<span class="ipid">${esc(ipid)}</span>`:""}<span>${time||""}</span>`;
     div.appendChild(meta);
-    if(text){const b=document.createElement("div");b.textContent=text;div.appendChild(b);}
+    if(text){const b=document.createElement("div");b.className="md-body";b.innerHTML=renderMarkdown(text);div.appendChild(b);}
     if(fileHtml){const w=document.createElement("div");w.innerHTML=fileHtml;div.appendChild(w);}
     if(mid){const r=document.createElement("div");r.className="reads";r.dataset.mid=mid;div.appendChild(r);div.addEventListener("click",()=>showReceipts(mid));}
   }
@@ -471,24 +567,70 @@ function leaveVoice(silent){
 function toggleMute(){if(!localStream)return;muted=!muted;localStream.getAudioTracks().forEach(t=>{t.enabled=!muted;});setVoiceUI();}
 function ensurePeer(id,name,initiator){
   if(id===myId||peers.has(id)||!inVoice||!localStream)return;
-  const pc=new RTCPeerConnection(rtcConfig);const entry={pc,name:name||id,audio:null,analyser:null};
+  const pc=new RTCPeerConnection(rtcConfig);
+  // Perfect negotiation: lower id is polite
+  const polite=myId<id;
+  const entry={pc,name:name||id,audio:null,analyser:null,polite,makingOffer:false,ignoreOffer:false};
   peers.set(id,entry);updateVoicePeersUI();
-  localStream.getTracks().forEach(t=>pc.addTrack(t,localStream));
-  pc.onicecandidate=ev=>{if(ev.candidate)sendRaw({t:"signal",id:myId,to:id,u:myName,kind:"ice",payload:ev.candidate});};
-  pc.ontrack=ev=>{const stream=ev.streams[0];if(!stream)return;let audio=entry.audio;if(!audio){audio=document.createElement("audio");audio.autoplay=true;audio.playsInline=true;document.body.appendChild(audio);entry.audio=audio;}audio.srcObject=stream;startRemoteVolume(entry);};
-  pc.onconnectionstatechange=()=>{if(pc.connectionState==="failed"||pc.connectionState==="closed")removePeer(id);};
-  if(initiator)pc.createOffer().then(o=>pc.setLocalDescription(o)).then(()=>sendRaw({t:"signal",id:myId,to:id,u:myName,kind:"offer",payload:pc.localDescription})).catch(console.error);
+  localStream.getTracks().forEach(t=>{try{pc.addTrack(t,localStream);}catch(_){}});
+  pc.onicecandidate=ev=>{
+    if(ev.candidate) sendRaw({t:"signal",id:myId,to:id,u:myName,kind:"ice",payload:ev.candidate});
+  };
+  pc.ontrack=ev=>{
+    const stream=ev.streams[0]||new MediaStream([ev.track]);
+    let audio=entry.audio;
+    if(!audio){
+      audio=document.createElement("audio");
+      audio.autoplay=true; audio.playsInline=true;
+      document.body.appendChild(audio);
+      entry.audio=audio;
+    }
+    audio.srcObject=stream;
+    audio.play().catch(()=>{});
+    startRemoteVolume(entry);
+  };
+  pc.onconnectionstatechange=()=>{
+    if(pc.connectionState==="failed"||pc.connectionState==="closed"||pc.connectionState==="disconnected"){
+      if(pc.connectionState==="failed") removePeer(id);
+    }
+  };
+  pc.onnegotiationneeded=async()=>{
+    try{
+      entry.makingOffer=true;
+      await pc.setLocalDescription(await pc.createOffer());
+      sendRaw({t:"signal",id:myId,to:id,u:myName,kind:"offer",payload:pc.localDescription});
+    }catch(e){console.warn("nego",e);}
+    finally{entry.makingOffer=false;}
+  };
+  if(initiator){
+    // kick negotiation
+    pc.createOffer().then(o=>pc.setLocalDescription(o)).then(()=>{
+      sendRaw({t:"signal",id:myId,to:id,u:myName,kind:"offer",payload:pc.localDescription});
+    }).catch(console.error);
+  }
 }
 async function handleSignal(data){
-  if(!inVoice||!localStream)return;if(data.to&&data.to!==myId)return;
+  if(!inVoice||!localStream)return;
+  if(data.to&&data.to!==myId)return;
   const from=data.id;if(!from||from===myId)return;
-  if(!peers.has(from))ensurePeer(from,data.u||"?",false);
-  const entry=peers.get(from);if(!entry)return;const pc=entry.pc;
+  if(!peers.has(from)) ensurePeer(from, data.u||"?", false);
+  const entry=peers.get(from);if(!entry)return;
+  const pc=entry.pc;
   try{
-    if(data.kind==="offer"){await pc.setRemoteDescription(data.payload);const answer=await pc.createAnswer();await pc.setLocalDescription(answer);sendRaw({t:"signal",id:myId,to:from,u:myName,kind:"answer",payload:pc.localDescription});}
-    else if(data.kind==="answer")await pc.setRemoteDescription(data.payload);
-    else if(data.kind==="ice"&&data.payload)await pc.addIceCandidate(data.payload);
-  }catch(e){console.warn(e);}
+    if(data.kind==="offer"){
+      const offerCollision=(entry.makingOffer||pc.signalingState!=="stable");
+      entry.ignoreOffer=!entry.polite && offerCollision;
+      if(entry.ignoreOffer) return;
+      await pc.setRemoteDescription(data.payload);
+      const answer=await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      sendRaw({t:"signal",id:myId,to:from,u:myName,kind:"answer",payload:pc.localDescription});
+    } else if(data.kind==="answer"){
+      await pc.setRemoteDescription(data.payload);
+    } else if(data.kind==="ice"&&data.payload){
+      try{ await pc.addIceCandidate(data.payload); }catch(e){ if(!entry.ignoreOffer) console.warn(e); }
+    }
+  }catch(e){ console.warn("signal",e); }
 }
 function removePeer(id){
   const entry=peers.get(id);if(!entry)return;try{entry.pc.close();}catch(_){}
@@ -519,7 +661,7 @@ document.addEventListener("paste",e=>{
 els.loginBtn.onclick=tryLogin;els.loginCancel.onclick=()=>{els.loginGate.classList.remove("on");disconnect();};
 els.loginPass.onkeydown=e=>{if(e.key==="Enter")tryLogin();};
 (function(){const hash=location.hash.slice(1);if(!hash)return;const parts=hash.split("|");if(parts[0]&&(parts[0].startsWith("ws://")||parts[0].startsWith("wss://")))els.relay.value=decodeURIComponent(parts[0]);if(parts[1])els.passphrase.value=decodeURIComponent(parts[1]);})();
-addMessage({type:"system",text:"V0RT3X — size-locked encrypted files, optional accounts, IP hash, voice."});
+addMessage({type:"system",text:"V0RT3X — full markdown + [;(id)(text):] + [css:id] styles. Voice improved."});
 setVoiceUI();
 </script>
 </body>
