@@ -1,80 +1,11 @@
 <!DOCTYPE html>
-<html lang="en" id="thishtml">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>&ZeroWidthSpace;</title>
-  <link rel="shortcut icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' />">
-  <script>
-/* Immediately create a blob URL of the current HTML and navigate to it,
-   unless the page is already inside an iframe or already a blob URL. */
-(function () {
-  if (window.self !== window.top) return;      // **do nothing if in an iframe**
-  if (location.protocol === 'blob:') return;   // avoid infinite reload loop
-
-  const html = `
-<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>V0RT3X Chat</title>
-   <link rel="shortcut icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' />">
-  <style>
-    body {
-      margin: 0;
-      background: #000;
-      color: #fff;
-      font-family: system-ui, sans-serif;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      height: 100vh;
-    }
-    #s { opacity: 0.6; font-size: 0.9rem; }
-  </style>
-</head>
-<body>
-  <div id="s">Loading V0RT3X…</div>
-  <script>
-    // Short loader — always loads the official client
-    // Host this file anywhere. Update the GitHub client → everyone gets it.
-    (async () => {
-      const URLS = [
-        "https://kbsigmaboy67atschool.github.io/V0RT3X-C0D3S/index.html",
-        "https://raw.githubusercontent.com/kbsigmaboy67AtSchool/V0RT3X-C0D3S/main/index.html",
-        "https://cdn.jsdelivr.net/gh/kbsigmaboy67AtSchool/V0RT3X-C0D3S@main/index.html",
-      ];
-      const status = document.getElementById("s");
-      for (const url of URLS) {
-        try {
-          status.textContent = "Fetching…";
-          const res = await fetch(url + "?t=" + Date.now(), { cache: "no-store" });
-          if (!res.ok) throw new Error(res.status);
-          const html = await res.text();
-          document.open();
-          document.write(html);
-          document.close();
-          return;
-        } catch (e) {
-          console.warn("Failed", url, e);
-        }
-      }
-      status.textContent = "Could not load V0RT3X. Check network / repo.";
-    })();
-  <\/script>
-<\/body>
-<\/html>`;
-  const blob = new Blob([html], { type: 'text/html' });
-  const blobUrl = URL.createObjectURL(blob);
-
-  // Replace current document with the Blob URL (no back entry)
-  location.replace(blobUrl);
-})();
-</script>
+  <link rel="shortcut icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' />">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0&icon_names=mic,mic_off,attach_file,folder_open,send,lock,person" />
-  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
   <style>
     :root {
       --bg:#000; --surface:#0d0d0d; --surface2:#161616; --text:#fff;
@@ -456,14 +387,6 @@ function claimUsername(wanted){const taken=new Set([...online.values()].map(x=>x
 function can(action){if(!acl.enabled)return true;return!!myPerms[action];}
 
 
-// ── Markdown 2.0 ─────────────────────────────────────────────
-const SAFE_CSS_PROPS = new Set([
-  "color","background","background-color","font-size","font-weight","font-style",
-  "text-decoration","text-shadow","letter-spacing","opacity","border","border-radius",
-  "padding","margin","display","filter","transform"
-]);
-
-
 function mdEscape(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
 function mdToHtmlInline(s){
   s=mdEscape(s);
@@ -476,6 +399,7 @@ function mdToHtmlInline(s){
   s=s.replace(/~~([^~]+)~~/g,'<del>$1</del>');
   return s;
 }
+
 function mdToHtml(src){
   const lines=String(src||"").replace(/\r\n/g,"\n").split("\n");
   const out=[]; let inCode=false; let codeBuf=[]; let inUl=false; let inOl=false;
