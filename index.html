@@ -87,6 +87,21 @@
     *{box-sizing:border-box;margin:0;padding:0}
     body{font-family:var(--font);background:var(--bg);color:var(--text);height:100vh;display:flex;flex-direction:column;overflow:hidden}
     .material-symbols-outlined{font-variation-settings:"FILL" 0,"wght" 400,"GRAD" 0,"opsz" 24;font-size:18px;vertical-align:middle;user-select:none}
+    
+    .tabbar{display:flex;gap:6px;padding:8px 12px;border-bottom:2px solid #333;background:#0a0a0a;overflow-x:auto;flex-shrink:0;align-items:center}
+    .tab{padding:6px 12px;border:2px solid #333;border-radius:999px;background:#111;color:#ccc;cursor:pointer;font-size:0.78rem;white-space:nowrap;max-width:160px;overflow:hidden;text-overflow:ellipsis}
+    .tab.on{border-color:#fff;color:#fff;box-shadow:0 0 8px rgba(255,255,255,0.2)}
+    .tab .x{margin-left:6px;opacity:0.5}
+    .pub-list{display:flex;flex-direction:column;gap:6px;max-height:160px;overflow-y:auto}
+    .pub-item{padding:8px;border:1px solid #333;border-radius:10px;cursor:pointer;font-size:0.78rem;background:#111}
+    .pub-item:hover{border-color:#fff}
+    .pub-item .t{font-weight:600;color:#fff}
+    .pub-item .n{color:#888;font-size:0.72rem;margin-top:2px}
+    #idbModal,#newChatModal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:70;align-items:center;justify-content:center}
+    #idbModal.on,#newChatModal.on{display:flex}
+    .modal-box{background:#111;border:2px solid #fff;border-radius:16px;padding:18px;width:min(440px,94%);max-height:85vh;overflow:auto;display:flex;flex-direction:column;gap:10px}
+    .saved-relay{display:flex;gap:6px;align-items:center;font-size:0.78rem}
+
     header{display:flex;align-items:center;justify-content:space-between;padding:12px 18px;border-bottom:2px solid var(--border);flex-shrink:0}
     .logo{font-weight:700;font-size:1.45rem;letter-spacing:.1em;text-shadow:0 0 8px rgba(255,255,255,.35),0 0 18px rgba(255,255,255,.15)}
     .logo span{opacity:.55;font-weight:400;font-size:.8em;text-shadow:none}
@@ -218,8 +233,35 @@
       <div class="dot" id="voiceDot"></div>
     </div>
   </header>
+  <div class="tabbar" id="tabbar">
+    <button class="tab on" data-tab="main" type="button">Main</button>
+    <button class="btn btn-icon" id="newTabBtn" title="New tab" type="button" style="border-radius:999px;padding:6px 10px">+</button>
+  </div>
   <main>
     <aside class="panel">
+
+      <div>
+        <h2>Quick start</h2>
+        <div class="row">
+          <button class="btn" id="openNewChatBtn" type="button" style="flex:1">New chat</button>
+          <button class="btn" id="openIdbBtn" type="button" style="flex:1">Saved data</button>
+        </div>
+        <p class="hint" style="margin-top:5px">Multi-tab · multi-relay · public list</p>
+      </div>
+      <div>
+        <h2>Public rooms</h2>
+        <div class="row">
+          <button class="btn" id="refreshPublicBtn" type="button" style="flex:1" disabled>Refresh</button>
+          <button class="btn" id="publishRoomBtn" type="button" style="flex:1" disabled>Publish</button>
+        </div>
+        <div class="pub-list" id="publicList"><p class="hint">Connect to a relay, then refresh.</p></div>
+      </div>
+      <div>
+        <h2>Saved WebSockets</h2>
+        <div id="savedRelays" class="pub-list"></div>
+        <button class="btn" id="saveRelayBtn" type="button" style="width:100%;margin-top:6px" disabled>Save current WSS</button>
+      </div>
+
       <div>
         <h2>Identity</h2>
         <label for="username">Username</label>
@@ -292,6 +334,30 @@
     </section>
   </main>
   
+  
+  <div id="newChatModal"><div class="modal-box">
+    <h3>Start chat</h3>
+    <label class="chk"><input type="checkbox" id="ncEncrypted" checked /> Encrypted (AES)</label>
+    <label class="chk"><input type="checkbox" id="ncPublic" /> List as public room</label>
+    <label>Room title (public)</label>
+    <input id="ncTitle" placeholder="Lobby" />
+    <label>Note (optional — can include key if you want)</label>
+    <input id="ncNote" placeholder="key=secret still encrypts traffic" />
+    <label>WebSocket URL</label>
+    <input id="ncRelay" placeholder="wss://…" />
+    <label>Passphrase (if encrypted)</label>
+    <input id="ncPass" type="password" placeholder="empty only if unencrypted" />
+    <button class="btn" id="ncStartBtn" style="width:100%">Open in new tab</button>
+    <button class="btn btn-danger" id="ncCancelBtn" style="width:100%">Cancel</button>
+  </div></div>
+  <div id="idbModal"><div class="modal-box">
+    <h3>Device storage (IndexedDB)</h3>
+    <p class="hint">Conversations encrypted at rest with room key. Load+broadcast = simulated cloud history.</p>
+    <button class="btn" id="idbSaveConvBtn" style="width:100%">Save current conversation</button>
+    <div id="idbList" class="pub-list"></div>
+    <button class="btn btn-danger" id="idbCloseBtn" style="width:100%">Close</button>
+  </div></div>
+
   <div id="msgMenu"><div id="msgMenuBox">
     <h3>Message</h3>
     <div id="msgPreview"></div>
@@ -756,15 +822,167 @@ function openLoginGate(){
   els.loginGate.classList.add("on");els.loginUser.value="";els.loginPass.value="";
 }
 
+
+// === Multi-tab · saved relays · public · IndexedDB ===
+const DIR_SUFFIX="/r/__public_directory";
+let activeTabId="main";
+const tabs=new Map();
+const sessions=new Map();
+let publicDirWs=null;
+let publicRooms=[];
+
+function tabLabel(id){if(id==="main")return"Main";const s=tabs.get(id);return(s&&s.title)||id.slice(0,8);}
+function renderTabBar(){
+  const bar=$("tabbar");if(!bar)return;
+  const addBtn=bar.querySelector("#newTabBtn");
+  bar.querySelectorAll(".tab").forEach(x=>x.remove());
+  const all=new Set(["main",...tabs.keys()]);
+  for(const id of all){
+    const b=document.createElement("button");
+    b.type="button";b.className="tab"+(id===activeTabId?" on":"");
+    b.innerHTML=esc(tabLabel(id))+(id!=="main"?' <span class="x" data-close="'+id+'">×</span>':"");
+    b.onclick=e=>{if(e.target.dataset.close){closeTab(e.target.dataset.close);return;}switchTab(id);};
+    bar.insertBefore(b,addBtn);
+  }
+}
+function switchTab(id){
+  if(id===activeTabId)return;
+  activeTabId=id;
+  const s=tabs.get(id);
+  if(s){els.relay.value=s.relay||"";els.passphrase.value=s.pass||"";if(s.myName)els.username.value=s.myName;}
+  renderTabBar();
+  addMessage({type:"system",text:"Tab: "+tabLabel(id)});
+}
+function closeTab(id){
+  if(id==="main")return;
+  const sess=sessions.get(id);if(sess&&sess.ws)try{sess.ws.close();}catch(_){}
+  sessions.delete(id);tabs.delete(id);
+  if(activeTabId===id)activeTabId="main";
+  renderTabBar();
+}
+if($("newTabBtn"))$("newTabBtn").onclick=()=>{
+  const id="t"+(typeof uuid==="function"?uuid():Math.random().toString(16).slice(2)).slice(0,6);
+  tabs.set(id,{title:"New",relay:"",pass:"",encrypted:true});
+  activeTabId=id;renderTabBar();
+};
+
+function loadSavedRelays(){try{return JSON.parse(localStorage.getItem("v0rt3x_relays")||"[]");}catch{return[];}}
+function saveSavedRelays(list){localStorage.setItem("v0rt3x_relays",JSON.stringify(list.slice(0,30)));renderSavedRelays();}
+function renderSavedRelays(){
+  const box=$("savedRelays");if(!box)return;
+  const list=loadSavedRelays();
+  if(!list.length){box.innerHTML='<p class="hint">None saved yet.</p>';return;}
+  box.innerHTML=list.map((u,i)=>'<div class="saved-relay"><span style="flex:1;overflow:hidden;text-overflow:ellipsis">'+esc(u)+'</span><button class="btn btn-icon" data-use="'+i+'" type="button">→</button><button class="btn btn-icon btn-danger" data-del="'+i+'" type="button">×</button></div>').join("");
+  box.querySelectorAll("[data-use]").forEach(b=>b.onclick=()=>{els.relay.value=list[+b.dataset.use];});
+  box.querySelectorAll("[data-del]").forEach(b=>b.onclick=()=>{const L=loadSavedRelays();L.splice(+b.dataset.del,1);saveSavedRelays(L);});
+}
+if($("saveRelayBtn"))$("saveRelayBtn").onclick=()=>{
+  const u=els.relay.value.trim();if(!u)return;
+  const L=loadSavedRelays();if(!L.includes(u))L.unshift(u);saveSavedRelays(L);
+  addMessage({type:"system",text:"Saved WebSocket"});
+};
+
+const IDB_NAME="v0rt3x_db",IDB_VER=1;
+function idbOpen(){return new Promise((res,rej)=>{const r=indexedDB.open(IDB_NAME,IDB_VER);r.onupgradeneeded=()=>{const db=r.result;if(!db.objectStoreNames.contains("conversations")){db.createObjectStore("conversations",{keyPath:"id"}).createIndex("updated","updated");}};r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);});}
+async function idbPutConv(rec){const db=await idbOpen();return new Promise((res,rej)=>{const tx=db.transaction("conversations","readwrite");tx.objectStore("conversations").put(rec);tx.oncomplete=()=>res();tx.onerror=()=>rej(tx.error);});}
+async function idbAllConvs(){const db=await idbOpen();return new Promise((res,rej)=>{const q=db.transaction("conversations","readonly").objectStore("conversations").getAll();q.onsuccess=()=>res(q.result||[]);q.onerror=()=>rej(q.error);});}
+async function idbDelConv(id){const db=await idbOpen();return new Promise((res,rej)=>{const tx=db.transaction("conversations","readwrite");tx.objectStore("conversations").delete(id);tx.oncomplete=()=>res();tx.onerror=()=>rej(tx.error);});}
+async function saveCurrentConversation(){
+  if(!connected){addMessage({type:"system",text:"Connect first"});return;}
+  const lines=[];
+  for(const[mid,m]of msgStore){if(m.localDeleted||m.unsent)continue;lines.push({mid,u:m.senderName,id:m.senderId,text:m.text,isHtml:m.isHtml,ts:m.ts});}
+  const payload=JSON.stringify({room:currentRoomKey,lines,savedAt:Date.now()});
+  let cipher;if(aesKey)cipher=await encryptText(payload);else cipher=btoa(unescape(encodeURIComponent(payload)));
+  await idbPutConv({id:(typeof uuid==="function"?uuid():String(Date.now())),title:(els.relay.value||currentRoomKey||"chat").slice(0,80),roomKey:currentRoomKey,relay:els.relay.value,encrypted:!!aesKey,updated:Date.now(),cipher});
+  addMessage({type:"system",text:"Saved "+lines.length+" messages on device"});
+  renderIdbList();
+}
+async function loadConversationToRoom(id,broadcast){
+  const all=await idbAllConvs();const rec=all.find(x=>x.id===id);if(!rec)return;
+  let plain;try{if(rec.encrypted&&aesKey)plain=await decryptText(rec.cipher);else plain=decodeURIComponent(escape(atob(rec.cipher)));}catch(e){addMessage({type:"system",text:"Decrypt failed (wrong key?)"});return;}
+  let data;try{data=JSON.parse(plain);}catch{addMessage({type:"system",text:"Corrupt save"});return;}
+  for(const line of(data.lines||[])){addMessage({type:line.id===myId?"own":"other",user:line.u||"?",text:line.text,isHtml:line.isHtml,mid:line.mid||(typeof uuid==="function"?uuid():String(Math.random())).slice(0,12),senderId:line.id,ts:line.ts,time:line.ts?new Date(line.ts).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}):""});}
+  if(broadcast&&connected&&aesKey){const pack=await encryptText(JSON.stringify({lines:data.lines||[]}));sendRaw({t:"history",id:myId,u:myName,c:pack});addMessage({type:"system",text:"Broadcast history to room"});}
+  else addMessage({type:"system",text:"Loaded "+(data.lines||[]).length+" messages"});
+}
+async function renderIdbList(){
+  const box=$("idbList");if(!box)return;
+  const all=await idbAllConvs();all.sort((a,b)=>b.updated-a.updated);
+  if(!all.length){box.innerHTML='<p class="hint">No saved conversations.</p>';return;}
+  box.innerHTML=all.map(r=>'<div class="pub-item"><div class="t">'+esc(r.title)+'</div><div class="n">'+new Date(r.updated).toLocaleString()+' · '+(r.encrypted?"encrypted":"open")+'</div><div class="row" style="margin-top:6px"><button class="btn" data-load="'+r.id+'" type="button">Load</button><button class="btn" data-bcast="'+r.id+'" type="button">Load+broadcast</button><button class="btn btn-danger" data-rm="'+r.id+'" type="button">Delete</button></div></div>').join("");
+  box.querySelectorAll("[data-load]").forEach(b=>b.onclick=()=>loadConversationToRoom(b.dataset.load,false));
+  box.querySelectorAll("[data-bcast]").forEach(b=>b.onclick=()=>loadConversationToRoom(b.dataset.bcast,true));
+  box.querySelectorAll("[data-rm]").forEach(b=>b.onclick=async()=>{await idbDelConv(b.dataset.rm);renderIdbList();});
+}
+
+function directoryUrlFromRelay(wsUrl){try{const u=new URL(wsUrl);return u.protocol+"//"+u.host+DIR_SUFFIX;}catch{return null;}}
+function renderPublicList(){
+  const box=$("publicList");if(!box)return;
+  if(!publicRooms.length){box.innerHTML='<p class="hint">No public rooms yet.</p>';return;}
+  box.innerHTML=publicRooms.map((r,i)=>'<div class="pub-item" data-pub="'+i+'"><div class="t">'+esc(r.title||"Room")+(r.encrypted?" 🔒":"")+'</div><div class="n">'+esc(r.note||"")+" · "+esc(r.url||"")+"</div></div>").join("");
+  box.querySelectorAll("[data-pub]").forEach(b=>b.onclick=()=>{
+    const r=publicRooms[+b.dataset.pub];if(!r)return;
+    els.relay.value=r.url;
+    if(r.keyInNote&&r.note){const m=r.note.match(/key[=:]\s*(\S+)/i);if(m)els.passphrase.value=m[1];}
+    addMessage({type:"system",text:"Public room filled — press Connect"});
+  });
+}
+function connectPublicDirectory(baseWs){
+  const dir=directoryUrlFromRelay(baseWs);if(!dir)return;
+  try{if(publicDirWs)publicDirWs.close();}catch(_){}
+  try{
+    publicDirWs=new WebSocket(dir);
+    publicDirWs.onopen=()=>{publicDirWs.send(JSON.stringify({t:"public-sync"}));if($("refreshPublicBtn"))$("refreshPublicBtn").disabled=false;if($("publishRoomBtn"))$("publishRoomBtn").disabled=!connected;};
+    publicDirWs.onmessage=ev=>{let d;try{d=JSON.parse(ev.data);}catch{return;}
+      if(d.t==="public-list"&&Array.isArray(d.rooms)){publicRooms=d.rooms;renderPublicList();}
+      if(d.t==="public-announce"&&d.room){const i=publicRooms.findIndex(x=>x.url===d.room.url);if(i>=0)publicRooms[i]=d.room;else publicRooms.push(d.room);renderPublicList();}
+    };
+  }catch(e){console.warn(e);}
+}
+function publishCurrentRoom(){
+  if(!connected){addMessage({type:"system",text:"Connect first"});return;}
+  const title=prompt("Public title?","Chat")||"Chat";
+  const note=prompt("Note (optional, e.g. key=secret)","")||"";
+  const room={url:els.relay.value.trim(),title,note,encrypted:!!aesKey,keyInNote:/key[=:]/i.test(note),ts:Date.now()};
+  if(publicDirWs&&publicDirWs.readyState===1)publicDirWs.send(JSON.stringify({t:"public-announce",room}));
+  else connectPublicDirectory(els.relay.value);
+  const i=publicRooms.findIndex(x=>x.url===room.url);if(i>=0)publicRooms[i]=room;else publicRooms.push(room);
+  renderPublicList();
+  addMessage({type:"system",text:"Published (needs relay path /r/__public_directory to sync across users)"});
+}
+
+if($("openNewChatBtn"))$("openNewChatBtn").onclick=()=>{$("ncRelay").value=els.relay.value;$("newChatModal").classList.add("on");};
+if($("ncCancelBtn"))$("ncCancelBtn").onclick=()=>$("newChatModal").classList.remove("on");
+if($("ncStartBtn"))$("ncStartBtn").onclick=()=>{
+  const enc=$("ncEncrypted").checked;const relay=$("ncRelay").value.trim();const pass=$("ncPass").value;
+  if(!relay){alert("Need WSS URL");return;}
+  if(enc&&(!pass||pass.length<4)){alert("Encrypted needs passphrase ≥4");return;}
+  const id="t"+(typeof uuid==="function"?uuid():Math.random().toString(16).slice(2)).slice(0,6);
+  tabs.set(id,{title:$("ncTitle").value||relay.split("/").pop(),relay,pass:enc?pass:"",encrypted:enc});
+  activeTabId=id;els.relay.value=relay;els.passphrase.value=enc?pass:"";
+  window._forceUnencrypted=!enc;
+  $("newChatModal").classList.remove("on");renderTabBar();
+  if($("ncPublic").checked)window._publishAfterConnect={title:$("ncTitle").value,note:$("ncNote").value};
+  connect();
+};
+if($("openIdbBtn"))$("openIdbBtn").onclick=()=>{$("idbModal").classList.add("on");renderIdbList();};
+if($("idbCloseBtn"))$("idbCloseBtn").onclick=()=>$("idbModal").classList.remove("on");
+if($("idbSaveConvBtn"))$("idbSaveConvBtn").onclick=()=>saveCurrentConversation();
+if($("refreshPublicBtn"))$("refreshPublicBtn").onclick=()=>{if(publicDirWs&&publicDirWs.readyState===1)publicDirWs.send(JSON.stringify({t:"public-sync"}));else if(els.relay.value)connectPublicDirectory(els.relay.value);};
+if($("publishRoomBtn"))$("publishRoomBtn").onclick=()=>publishCurrentRoom();
+renderSavedRelays();renderTabBar();
+
 function connect(){
   const url=els.relay.value.trim(),pass=els.passphrase.value;
   myName=claimUsername((els.username.value.trim()||"user").slice(0,24));
   els.username.value=myName;localStorage.setItem("v0rt3x_username",myName);
   if(!url||(!url.startsWith("wss://")&&!url.startsWith("ws://"))){addMessage({type:"system",text:"Enter a valid ws:// or wss:// URL."});return;}
-  if(!pass||pass.length<4){addMessage({type:"system",text:"Passphrase must be at least 4 characters."});return;}
+  const unenc=!!window._forceUnencrypted||pass==="";
+  if(!unenc&&(!pass||pass.length<4)){addMessage({type:"system",text:"Passphrase must be at least 4 characters."});return;}
+  window._forceUnencrypted=false;
   currentRoomKey=roomKeyFromUrl(url);els.connectBtn.disabled=true;setStatus("connecting…",false,false,false);
   online.clear();authed=false;
-  deriveKey(pass,currentRoomKey).then(key=>{
+  const _start=key=>{
     aesKey=key;ws=new WebSocket(url);
     ws.onmessage=async ev=>{
       let data;try{data=JSON.parse(ev.data);}catch{return;}if(!data)return;
@@ -773,6 +991,11 @@ function connect(){
         els.myIdLine.textContent=myIpId?("hash: "+myIpId):"hash: (update worker for IP lock)";
         if(myIpId&&ipTaken(myIpId,myId)){addMessage({type:"system",text:"Network hash already in room. Blocked."});ws.close();return;}
         connected=true;els.disconnectBtn.disabled=false;els.applySettingsBtn.disabled=false;els.applyAclBtn.disabled=false;
+        if($("saveRelayBtn"))$("saveRelayBtn").disabled=false;
+        if($("publishRoomBtn"))$("publishRoomBtn").disabled=false;
+        connectPublicDirectory(url);
+        sessions.set(activeTabId,{ws,relay:url,encrypted:!!aesKey,roomKey:currentRoomKey});
+        if(window._publishAfterConnect){const p=window._publishAfterConnect;window._publishAfterConnect=null;setTimeout(()=>{const room={url,title:p.title||"Chat",note:p.note||"",encrypted:!!aesKey,keyInNote:/key[=:]/i.test(p.note||""),ts:Date.now()};if(publicDirWs&&publicDirWs.readyState===1)publicDirWs.send(JSON.stringify({t:"public-announce",room}));publicRooms.push(room);renderPublicList();},800);}
         setTimeout(()=>openLoginGate(),400);return;
       }
       if(data.t==="acl"&&data.acl&&data.id!==myId){
@@ -808,7 +1031,7 @@ function connect(){
       }
       if(data.t==="msg"&&data.c){
         if(!roomSettings.text||!can("read"))return;
-        const plain=await decryptText(data.c);if(plain===null)return;
+        let plain;if(data.plain||!aesKey)plain=data.c;else{plain=await decryptText(data.c);if(plain===null)return;}
         const mid=data.mid||null;
         addMessage({type:data.id===myId?"own":"other",user:data.u||"?",ipid:data.ipId||"",text:plain,time:data.ts?new Date(data.ts).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}):nowTime(),mid,isHtml:!!data.html||plain.trimStart().startsWith("<"),senderId:data.id,ts:data.ts||Date.now()});
         if(mid&&data.id!==myId&&can("read"))sendRaw({t:"read",mid,id:myId,u:myName,ts:Date.now()});return;
@@ -821,6 +1044,11 @@ function connect(){
         if(!roomSettings.files||!can("read"))return;
         try{const plain=await decryptText(data.c);if(!plain)return;const obj=JSON.parse(plain);showFile(data.u||"?",obj.name,obj.mime,b64dec(obj.b64),false,data.ipId);}catch(e){console.warn(e);}return;
       }
+      if(data.t==="history"&&data.c&&data.id!==myId){
+        try{const plain=await decryptText(data.c);if(!plain)return;const pack=JSON.parse(plain);
+          for(const line of(pack.lines||[])){if(line.mid&&msgStore.has(line.mid))continue;
+            addMessage({type:line.id===myId?"own":"other",user:line.u||"?",text:line.text,isHtml:line.isHtml,mid:line.mid||uuid().slice(0,12),senderId:line.id,ts:line.ts,time:line.ts?new Date(line.ts).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}):""});}
+          addMessage({type:"system",text:"History from "+(data.u||"peer")});}catch(e){console.warn(e);}return;}
       if(data.t==="unsend"&&data.mid){
         if(data.id!==myId) applyUnsend(data.mid, data.u||"Someone");
         return;
@@ -848,7 +1076,8 @@ function connect(){
         addMessage({type:"system",text:"Joined (no IP hash — update worker for lock)"});openLoginGate();
       }
     },1500);
-  }).catch(err=>{console.error(err);els.connectBtn.disabled=false;setStatus("key error",false,false,false);});
+  };
+if(unenc) _start(null); else deriveKey(pass,currentRoomKey).then(_start).catch(err=>{console.error(err);els.connectBtn.disabled=false;setStatus("key error",false,false,false);});
 }
 function disconnect(){leaveVoice(true);if(ws){ws.close();ws=null;}}
 
@@ -857,7 +1086,7 @@ async function sendMessage(){
   const text=getComposerText().trim();if(!text)return;
   const mid=(typeof uuid==="function"?uuid():(crypto.randomUUID?crypto.randomUUID():String(Math.random()))).slice(0,12);
   const isHtml=text.trimStart().startsWith("<");
-  sendRaw({t:"msg",mid,u:myName,id:myId,ipId:myIpId,ts:Date.now(),c:await encryptText(text),html:!!isHtml});
+  const payload=aesKey?await encryptText(text):text;sendRaw({t:"msg",mid,u:myName,id:myId,ipId:myIpId,ts:Date.now(),c:payload,html:!!isHtml,plain:!aesKey});
   addMessage({type:"own",user:myName,ipid:myIpId||"",text,time:nowTime(),mid,isHtml,senderId:myId,ts:Date.now()});
   receipts.set(mid,[]);
   setComposerText("");
