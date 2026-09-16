@@ -462,6 +462,75 @@ const SAFE_CSS_PROPS = new Set([
   "text-decoration","text-shadow","letter-spacing","opacity","border","border-radius",
   "padding","margin","display","filter","transform"
 ]);
+
+
+function mdEscape(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
+function mdToHtmlInline(s){
+  s=mdEscape(s);
+  s=s.replace(/!\[([^\]]*)\]\((https?:[^)\s]+)\)/g,'<img alt="$1" src="$2" />');
+  s=s.replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g,'<a href="$2" target="_blank" rel="noopener">$1</a>');
+  s=s.replace(/`([^`]+)`/g,'<code>$1</code>');
+  s=s.replace(/\*\*\*([^*]+)\*\*\*/g,'<strong><em>$1</em></strong>');
+  s=s.replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>');
+  s=s.replace(/\*([^*]+)\*/g,'<em>$1</em>');
+  s=s.replace(/~~([^~]+)~~/g,'<del>$1</del>');
+  return s;
+}
+function mdToHtml(src){
+  const lines=String(src||"").replace(/\r\n/g,"\n").split("\n");
+  const out=[]; let inCode=false; let codeBuf=[]; let inUl=false; let inOl=false;
+  const closeLists=()=>{if(inUl){out.push("</ul>");inUl=false;}if(inOl){out.push("</ol>");inOl=false;}};
+  for(let i=0;i<lines.length;i++){
+    const line=lines[i];
+    if(inCode){
+      if(/^```/.test(line)){out.push("<pre><code>"+mdEscape(codeBuf.join("\n"))+"</code></pre>");inCode=false;codeBuf=[];}
+      else codeBuf.push(line);
+      continue;
+    }
+    if(/^```/.test(line)){closeLists();inCode=true;codeBuf=[];continue;}
+    if(/^---+$/.test(line.trim())){closeLists();out.push("<hr>");continue;}
+    const hm=line.match(/^(#{1,6})\s+(.+)$/);
+    if(hm){closeLists();const n=hm[1].length;out.push("<h"+n+">"+mdToHtmlInline(hm[2])+"</h"+n+">");continue;}
+    if(/^\s*[-*+]\s+/.test(line)){
+      if(inOl){out.push("</ol>");inOl=false;}
+      if(!inUl){out.push("<ul>");inUl=true;}
+      out.push("<li>"+mdToHtmlInline(line.replace(/^\s*[-*+]\s+/,""))+"</li>");
+      continue;
+    }
+    if(/^\s*\d+\.\s+/.test(line)){
+      if(inUl){out.push("</ul>");inUl=false;}
+      if(!inOl){out.push("<ol>");inOl=true;}
+      out.push("<li>"+mdToHtmlInline(line.replace(/^\s*\d+\.\s+/,""))+"</li>");
+      continue;
+    }
+    closeLists();
+    if(line.trim()===""){out.push("");continue;}
+    out.push("<p>"+mdToHtmlInline(line)+"</p>");
+  }
+  closeLists();
+  if(inCode) out.push("<pre><code>"+mdEscape(codeBuf.join("\n"))+"</code></pre>");
+  return out.join("\n");
+}
+
+// ── Legacy CSS + Markdown ──────────────────────────────────
+// Message form:
+//   ;;:{
+//     $(a) { color: red; font-weight: 700; }
+//     $(a):hover { color: #ff4d6a; }
+//   }
+//   Hello ;:(a)styled bit;: and **normal md**
+//
+// Rules:
+//   ;;:{ ... }   full CSS block at start (or anywhere); $(x) → class for id x
+//   ;:(x)text;:  wrap text in that id's class (x = one char A-Za-z0-9)
+const SAFE_CSS_PROPS = new Set([
+  "color","background","background-color","font-size","font-weight","font-style",
+  "font-family","text-decoration","text-shadow","letter-spacing","line-height",
+  "opacity","border","border-radius","border-color","border-width","border-style",
+  "padding","margin","display","filter","transform","transition","box-shadow",
+  "text-align","vertical-align","white-space","overflow","max-width","max-height",
+  "cursor","outline"
+]);
 function sanitizeCssDecl(decl){
   const out=[];
   for(const part of String(decl).split(";")){
@@ -470,66 +539,74 @@ function sanitizeCssDecl(decl){
     const prop=part.slice(0,i).trim().toLowerCase();
     let val=part.slice(i+1).trim();
     if(!SAFE_CSS_PROPS.has(prop)) continue;
-    if(/expression|url\s*\(|@import|javascript:/i.test(val)) continue;
+    if(/expression|url\s*\(|@import|javascript:|behavior|binding/i.test(val)) continue;
     out.push(prop+":"+val);
   }
   return out.join(";");
 }
-function parseMd2(raw){
-  const styles={}; // id -> css
-  let body=String(raw||"");
-  // [css:X] prop:val; ...
-  body=body.replace(/^\[css:([A-Za-z0-9])\]\s*(.+)$/gm,(_,id,css)=>{
-    styles[id]=sanitizeCssDecl(css);
-    return "";
-  });
-  // @css X { ... }
-  body=body.replace(/^@css\s+([A-Za-z0-9])\s*\{([^}]*)\}/gm,(_,id,css)=>{
-    styles[id]=sanitizeCssDecl(css);
-    return "";
-  });
-  return {body:body.trim(), styles};
+function sanitizeLegacyCssBlock(css, prefix){
+  // Allow selectors based on $(id) only; strip @import, expression, url(
+  let s=String(css||"");
+  if(/@import|expression\s*\(|javascript:/i.test(s)) return "";
+  // $(a) → .vmdPREFIX-a   and $(a):hover stays
+  s=s.replace(/\$\(([A-Za-z0-9])\)/g, (_,id)=>"."+prefix+"-"+id);
+  // remove url( anything
+  s=s.replace(/url\s*\([^)]*\)/gi,"/*blocked*/");
+  // only keep rule blocks that start with our prefix class
+  const kept=[];
+  const re=/([^{}]+)\{([^{}]*)\}/g;
+  let m;
+  while((m=re.exec(s))){
+    const sel=m[1].trim();
+    const body=sanitizeCssDecl(m[2]);
+    if(!body) continue;
+    // selector must reference our prefix class
+    if(sel.indexOf("."+prefix+"-")===-1) continue;
+    // ban dangerous selectors
+    if(/[<>]|attr\s*\(|@/i.test(sel)) continue;
+    kept.push(sel+"{"+body+"}");
+  }
+  return kept.join("\n");
 }
 function renderMarkdown(raw){
-  const {body, styles}=parseMd2(raw);
+  let body=String(raw||"");
+  const uid="v"+(typeof uuid==="function"?uuid():String(Date.now())).replace(/-/g,"").slice(0,10);
+  const prefix="vmd"+uid;
+  let styleHtml="";
+  // Extract ALL ;;:{ ... } blocks
+  body=body.replace(/;;:\{([\s\S]*?)\}/g,(_,css)=>{
+    const clean=sanitizeLegacyCssBlock(css, prefix);
+    if(clean) styleHtml+="<style>"+clean+"</style>";
+    return "";
+  });
+  // Placeholders for ;:(x)content;:
   const parts=[];
   let i=0;
-  // Custom: [;(id)(markdown content):]
-  const replaced=body.replace(/\[;\(([A-Za-z0-9])\)\(([\s\S]*?)\):\]/g,(_,id,inner)=>{
-    const key="%%MD2"+i+"%%";
+  body=body.replace(/;\(([A-Za-z0-9])\)([\s\S]*?);:/g,(_,id,inner)=>{
+    const key="%%LEG"+i+"%%";
     parts.push({key,id,inner});
     i++;
     return key;
   });
+  // Markdown body
   let html;
   try{
-    if(typeof marked!=="undefined"){
-      marked.setOptions({gfm:true,breaks:true});
-      html=marked.parse(replaced);
-    } else {
-      html=esc(replaced).replace(/\n/g,"<br>");
-    }
-  }catch(e){
-    html=esc(replaced).replace(/\n/g,"<br>");
-  }
+    if(typeof mdToHtml==="function") html=mdToHtml(body.trim());
+    else if(typeof marked!=="undefined"){ marked.setOptions({gfm:true,breaks:true}); html=marked.parse(body.trim()); }
+    else html=esc(body.trim()).replace(/\n/g,"<br>");
+  }catch(e){ html=esc(body.trim()).replace(/\n/g,"<br>"); }
   for(const part of parts){
     let innerHtml;
     try{
-      innerHtml=(typeof marked!=="undefined")?marked.parseInline(part.inner):esc(part.inner);
+      if(typeof mdToHtmlInline==="function") innerHtml=mdToHtmlInline(part.inner);
+      else if(typeof marked!=="undefined"&&marked.parseInline) innerHtml=marked.parseInline(part.inner);
+      else innerHtml=esc(part.inner);
     }catch(_){ innerHtml=esc(part.inner); }
-    const css=styles[part.id]||"";
-    const span='<span class="md2 md2-'+esc(part.id)+'" style="'+css+'">'+innerHtml+'</span>';
+    const span='<span class="'+prefix+"-"+part.id+' md2">'+innerHtml+"</span>";
     html=html.split(part.key).join(span);
   }
-  if(typeof DOMPurify!=="undefined"){
-    html=DOMPurify.sanitize(html,{
-      USE_PROFILES:{html:true},
-      ADD_ATTR:["style","class","target","rel"],
-    });
-  }
-  return html;
+  return styleHtml+html;
 }
-
 
 function addMessage({type="other",user,ipid,text,time,fileHtml,mid,isHtml,senderId,ts}){
   if(mid&&msgStore.has(mid)&&type!=="system")return msgStore.get(mid).el;
