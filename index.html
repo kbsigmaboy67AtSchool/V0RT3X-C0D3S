@@ -253,6 +253,7 @@
         <div class="row">
           <button class="btn" id="refreshPublicBtn" type="button" style="flex:1" disabled>Refresh</button>
           <button class="btn" id="publishRoomBtn" type="button" style="flex:1" disabled>Publish</button>
+          <button class="btn btn-danger" id="unpublishRoomBtn" type="button" style="flex:1" disabled>Unpublish</button>
         </div>
         <div class="pub-list" id="publicList"><p class="hint">Connect to a relay, then refresh.</p></div>
       </div>
@@ -855,7 +856,9 @@ function switchTab(id){
 }
 function closeTab(id){
   if(id==="main")return;
-  const sess=sessions.get(id);if(sess&&sess.ws)try{sess.ws.close();}catch(_){}
+  const sess=sessions.get(id);
+  if(sess&&publishedUrl&&sess.relay===publishedUrl){try{unpublishCurrentRoom();}catch(_){}}
+  if(sess&&sess.ws)try{sess.ws.close();}catch(_){}
   sessions.delete(id);tabs.delete(id);
   if(activeTabId===id)activeTabId="main";
   renderTabBar();
@@ -915,40 +918,124 @@ async function renderIdbList(){
   box.querySelectorAll("[data-rm]").forEach(b=>b.onclick=async()=>{await idbDelConv(b.dataset.rm);renderIdbList();});
 }
 
-function directoryUrlFromRelay(wsUrl){try{const u=new URL(wsUrl);return u.protocol+"//"+u.host+DIR_SUFFIX;}catch{return null;}}
+function directoryUrlFromRelay(wsUrl){
+  try{
+    const u=new URL(wsUrl);
+    // Always same host + fixed directory path (not nested under current room)
+    return u.protocol+"//"+u.host+"/r/__public_directory";
+  }catch{return null;}
+}
 function renderPublicList(){
   const box=$("publicList");if(!box)return;
-  if(!publicRooms.length){box.innerHTML='<p class="hint">No public rooms yet.</p>';return;}
-  box.innerHTML=publicRooms.map((r,i)=>'<div class="pub-item" data-pub="'+i+'"><div class="t">'+esc(r.title||"Room")+(r.encrypted?" 🔒":"")+'</div><div class="n">'+esc(r.note||"")+" · "+esc(r.url||"")+"</div></div>").join("");
-  box.querySelectorAll("[data-pub]").forEach(b=>b.onclick=()=>{
-    const r=publicRooms[+b.dataset.pub];if(!r)return;
-    els.relay.value=r.url;
-    if(r.keyInNote&&r.note){const m=r.note.match(/key[=:]\s*(\S+)/i);if(m)els.passphrase.value=m[1];}
-    addMessage({type:"system",text:"Public room filled — press Connect"});
-  });
+  const now=Date.now();
+  publicRooms=(publicRooms||[]).filter(r=>r&&r.url&&(!r.expires||r.expires>now));
+  if(!publicRooms.length){box.innerHTML='<p class="hint">No live public rooms.</p>';return;}
+  box.innerHTML=publicRooms.map((r,i)=>'<div class="pub-item" data-pub="'+i+'"><div class="t">'+esc(r.title||"Room")+(r.encrypted?" 🔒":"")+'</div><div class="n">'+esc(r.note||"")+'</div><div class="n" style="opacity:0.7">'+esc(r.url||"")+'</div></div>').join("");
+  box.querySelectorAll("[data-pub]").forEach(b=>b.onclick=()=>joinPublicRoom(publicRooms[+b.dataset.pub]));
+}
+function joinPublicRoom(r){
+  if(!r||!r.url)return;
+  els.relay.value=r.url;
+  if(r.keyInNote&&r.note){
+    const m=r.note.match(/key[=:]\s*(\S+)/i);
+    if(m) els.passphrase.value=m[1];
+  } else if(!r.encrypted){
+    els.passphrase.value="";
+    window._forceUnencrypted=true;
+  }
+  addMessage({type:"system",text:"Joining public room: "+(r.title||r.url)});
+  // Auto-connect
+  try{ connect(); }catch(e){ console.warn(e); }
+}
+let publishedUrl=null;
+let publishHeartbeat=null;
+function stopPublishHeartbeat(){
+  if(publishHeartbeat){ clearInterval(publishHeartbeat); publishHeartbeat=null; }
+}
+function unpublishCurrentRoom(){
+  if(!publishedUrl)return;
+  const url=publishedUrl;
+  publishedUrl=null;
+  stopPublishHeartbeat();
+  if(publicDirWs&&publicDirWs.readyState===1){
+    publicDirWs.send(JSON.stringify({t:"public-unpublish",url}));
+  }
+  publicRooms=publicRooms.filter(r=>r.url!==url);
+  renderPublicList();
+  addMessage({type:"system",text:"Unpublished public room"});
 }
 function connectPublicDirectory(baseWs){
   const dir=directoryUrlFromRelay(baseWs);if(!dir)return;
+  // already connected to same dir?
+  if(publicDirWs&&publicDirWs.readyState===1&&publicDirWs._dir===dir){
+    publicDirWs.send(JSON.stringify({t:"public-sync"}));
+    return;
+  }
   try{if(publicDirWs)publicDirWs.close();}catch(_){}
   try{
     publicDirWs=new WebSocket(dir);
-    publicDirWs.onopen=()=>{publicDirWs.send(JSON.stringify({t:"public-sync"}));if($("refreshPublicBtn"))$("refreshPublicBtn").disabled=false;if($("publishRoomBtn"))$("publishRoomBtn").disabled=!connected;};
-    publicDirWs.onmessage=ev=>{let d;try{d=JSON.parse(ev.data);}catch{return;}
-      if(d.t==="public-list"&&Array.isArray(d.rooms)){publicRooms=d.rooms;renderPublicList();}
-      if(d.t==="public-announce"&&d.room){const i=publicRooms.findIndex(x=>x.url===d.room.url);if(i>=0)publicRooms[i]=d.room;else publicRooms.push(d.room);renderPublicList();}
+    publicDirWs._dir=dir;
+    publicDirWs.onopen=()=>{
+      publicDirWs.send(JSON.stringify({t:"public-sync"}));
+      if($("refreshPublicBtn"))$("refreshPublicBtn").disabled=false;
+      if($("publishRoomBtn"))$("publishRoomBtn").disabled=!connected;
+      if($("unpublishRoomBtn"))$("unpublishRoomBtn").disabled=!publishedUrl;
+    };
+    publicDirWs.onmessage=ev=>{
+      let d;try{d=JSON.parse(ev.data);}catch{return;}
+      if(d.t==="hello")return; // ignore room hello on directory
+      if(d.t==="public-list"&&Array.isArray(d.rooms)){
+        publicRooms=d.rooms;renderPublicList();
+      }
+      if(d.t==="public-announce"&&d.room){
+        const i=publicRooms.findIndex(x=>x.url===d.room.url);
+        if(i>=0)publicRooms[i]=d.room;else publicRooms.push(d.room);
+        renderPublicList();
+      }
+      if(d.t==="public-unpublish"&&d.url){
+        publicRooms=publicRooms.filter(r=>r.url!==d.url);
+        renderPublicList();
+      }
+    };
+    publicDirWs.onclose=()=>{
+      // directory dropped — local list may be stale; clear optional
     };
   }catch(e){console.warn(e);}
 }
 function publishCurrentRoom(){
-  if(!connected){addMessage({type:"system",text:"Connect first"});return;}
+  if(!connected){addMessage({type:"system",text:"Connect to a room first"});return;}
+  if(!publicDirWs||publicDirWs.readyState!==1){
+    connectPublicDirectory(els.relay.value);
+    addMessage({type:"system",text:"Connecting public directory… try Publish again in 1s"});
+    setTimeout(()=>{ if(publicDirWs&&publicDirWs.readyState===1) publishCurrentRoom(); },1000);
+    return;
+  }
   const title=prompt("Public title?","Chat")||"Chat";
   const note=prompt("Note (optional, e.g. key=secret)","")||"";
-  const room={url:els.relay.value.trim(),title,note,encrypted:!!aesKey,keyInNote:/key[=:]/i.test(note),ts:Date.now()};
-  if(publicDirWs&&publicDirWs.readyState===1)publicDirWs.send(JSON.stringify({t:"public-announce",room}));
-  else connectPublicDirectory(els.relay.value);
-  const i=publicRooms.findIndex(x=>x.url===room.url);if(i>=0)publicRooms[i]=room;else publicRooms.push(room);
+  const room={
+    url:els.relay.value.trim(),
+    title,note,
+    encrypted:!!aesKey,
+    keyInNote:/key[=:]/i.test(note),
+    owner:myId,
+    expires:Date.now()+10*60*1000,
+    ts:Date.now(),
+  };
+  publicDirWs.send(JSON.stringify({t:"public-announce",room}));
+  publishedUrl=room.url;
+  const i=publicRooms.findIndex(x=>x.url===room.url);
+  if(i>=0)publicRooms[i]=room;else publicRooms.push(room);
   renderPublicList();
-  addMessage({type:"system",text:"Published (needs relay path /r/__public_directory to sync across users)"});
+  if($("unpublishRoomBtn"))$("unpublishRoomBtn").disabled=false;
+  stopPublishHeartbeat();
+  // heartbeat refreshes TTL every 3 min
+  publishHeartbeat=setInterval(()=>{
+    if(!publicDirWs||publicDirWs.readyState!==1||!publishedUrl){stopPublishHeartbeat();return;}
+    room.expires=Date.now()+10*60*1000;
+    room.ts=Date.now();
+    publicDirWs.send(JSON.stringify({t:"public-announce",room}));
+  },3*60*1000);
+  addMessage({type:"system",text:"Published \""+title+"\" (auto-expires ~10 min, unpublish on leave)"});
 }
 
 if($("openNewChatBtn"))$("openNewChatBtn").onclick=()=>{$("ncRelay").value=els.relay.value;$("newChatModal").classList.add("on");};
@@ -970,6 +1057,7 @@ if($("idbCloseBtn"))$("idbCloseBtn").onclick=()=>$("idbModal").classList.remove(
 if($("idbSaveConvBtn"))$("idbSaveConvBtn").onclick=()=>saveCurrentConversation();
 if($("refreshPublicBtn"))$("refreshPublicBtn").onclick=()=>{if(publicDirWs&&publicDirWs.readyState===1)publicDirWs.send(JSON.stringify({t:"public-sync"}));else if(els.relay.value)connectPublicDirectory(els.relay.value);};
 if($("publishRoomBtn"))$("publishRoomBtn").onclick=()=>publishCurrentRoom();
+if($("unpublishRoomBtn"))$("unpublishRoomBtn").onclick=()=>unpublishCurrentRoom();
 renderSavedRelays();renderTabBar();
 
 function connect(){
@@ -1079,7 +1167,9 @@ function connect(){
   };
 if(unenc) _start(null); else deriveKey(pass,currentRoomKey).then(_start).catch(err=>{console.error(err);els.connectBtn.disabled=false;setStatus("key error",false,false,false);});
 }
-function disconnect(){leaveVoice(true);if(ws){ws.close();ws=null;}}
+function disconnect(){
+  try{ unpublishCurrentRoom(); }catch(_){}
+leaveVoice(true);if(ws){ws.close();ws=null;}}
 
 async function sendMessage(){
   if(!can("write")||!roomSettings.text||!aesKey||!connected||!authed)return;
