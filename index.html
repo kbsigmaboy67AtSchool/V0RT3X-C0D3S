@@ -422,6 +422,7 @@ let acl={enabled:false,guests:true,accounts:{},guestPerms:{read:true,write:false
 let myPerms={read:true,write:true,voice:true,files:true},accountName=null;
 const online=new Map(),receipts=new Map();
 const msgStore=new Map();
+let _sendingMsg=false;
 const UNSEND_MS=5*60*1000;
 let inVoice=false,muted=false,localStream=null;
 const peers=new Map();
@@ -531,6 +532,7 @@ function renderMarkdown(raw){
 
 
 function addMessage({type="other",user,ipid,text,time,fileHtml,mid,isHtml,senderId,ts}){
+  if(mid&&msgStore.has(mid)&&type!=="system")return msgStore.get(mid).el;
   const div=document.createElement("div");div.className="msg "+type;if(mid)div.dataset.mid=mid;
   if(type==="system"){ div.textContent=text; }
   else{
@@ -1119,10 +1121,13 @@ function connect(){
       }
       if(data.t==="msg"&&data.c){
         if(!roomSettings.text||!can("read"))return;
-        let plain;if(data.plain||!aesKey)plain=data.c;else{plain=await decryptText(data.c);if(plain===null)return;}
         const mid=data.mid||null;
-        addMessage({type:data.id===myId?"own":"other",user:data.u||"?",ipid:data.ipId||"",text:plain,time:data.ts?new Date(data.ts).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}):nowTime(),mid,isHtml:!!data.html||plain.trimStart().startsWith("<"),senderId:data.id,ts:data.ts||Date.now()});
-        if(mid&&data.id!==myId&&can("read"))sendRaw({t:"read",mid,id:myId,u:myName,ts:Date.now()});return;
+        // Dedupe: already shown (our optimistic send) or echo from relay
+        if(mid&&msgStore.has(mid))return;
+        if(data.id===myId)return;
+        let plain;if(data.plain||!aesKey)plain=data.c;else{plain=await decryptText(data.c);if(plain===null)return;}
+        addMessage({type:"other",user:data.u||"?",ipid:data.ipId||"",text:plain,time:data.ts?new Date(data.ts).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}):nowTime(),mid,isHtml:!!data.html||plain.trimStart().startsWith("<"),senderId:data.id,ts:data.ts||Date.now()});
+        if(mid&&can("read"))sendRaw({t:"read",mid,id:myId,u:myName,ts:Date.now()});return;
       }
       if(data.t==="read"&&data.mid&&data.id!==myId){
         if(!receipts.has(data.mid))receipts.set(data.mid,[]);
@@ -1172,16 +1177,25 @@ function disconnect(){
 leaveVoice(true);if(ws){ws.close();ws=null;}}
 
 async function sendMessage(){
-  if(!can("write")||!roomSettings.text||!aesKey||!connected||!authed)return;
-  const text=getComposerText().trim();if(!text)return;
-  const mid=(typeof uuid==="function"?uuid():(crypto.randomUUID?crypto.randomUUID():String(Math.random()))).slice(0,12);
-  const isHtml=text.trimStart().startsWith("<");
-  const payload=aesKey?await encryptText(text):text;sendRaw({t:"msg",mid,u:myName,id:myId,ipId:myIpId,ts:Date.now(),c:payload,html:!!isHtml,plain:!aesKey});
-  addMessage({type:"own",user:myName,ipid:myIpId||"",text,time:nowTime(),mid,isHtml,senderId:myId,ts:Date.now()});
-  receipts.set(mid,[]);
-  setComposerText("");
-  if(htmlMode) exitHtmlMode();
-  els.msgInput.focus();
+  if(_sendingMsg)return;
+  if(!can("write")||!roomSettings.text||!connected||!authed)return;
+  if(!aesKey&&!window._allowPlain){ /* unencrypted rooms set aesKey null intentionally */ }
+  const text=(typeof getComposerText==="function"?getComposerText():els.msgInput.value).trim();
+  if(!text)return;
+  _sendingMsg=true;
+  try{
+    const mid=(typeof uuid==="function"?uuid():String(Date.now()+Math.random())).slice(0,12);
+    if(msgStore.has(mid))return;
+    const isHtml=text.trimStart().startsWith("<");
+    const payload=aesKey?await encryptText(text):text;
+    sendRaw({t:"msg",mid,u:myName,id:myId,ipId:myIpId,ts:Date.now(),c:payload,html:!!isHtml,plain:!aesKey});
+    addMessage({type:"own",user:myName,ipid:myIpId||"",text,time:nowTime(),mid,isHtml,senderId:myId,ts:Date.now()});
+    receipts.set(mid,[]);
+    if(typeof setComposerText==="function")setComposerText("");
+    else{els.msgInput.value="";}
+    if(typeof htmlMode!=="undefined"&&htmlMode&&typeof exitHtmlMode==="function")exitHtmlMode();
+    els.msgInput.focus();
+  }finally{ _sendingMsg=false; }
 }
 function showFile(user,name,mime,bytes,isOwn,ipid){
   const blob=new Blob([bytes],{type:mime||"application/octet-stream"});const url=URL.createObjectURL(blob);
