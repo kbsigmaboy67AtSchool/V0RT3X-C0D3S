@@ -64,6 +64,31 @@
     .id-line{font-size:.68rem;color:#666;letter-spacing:.04em;margin-top:2px}
     .voice-bar{display:flex;flex-wrap:wrap;gap:8px;padding:10px;background:var(--surface2);border:2px solid #333;border-radius:var(--radius)}
     .voice-bar.on{border-color:var(--voice)}
+
+    #videoStage{display:none;position:fixed;inset:0;z-index:80;background:#0b0b0b;flex-direction:column;font-family:var(--font)}
+    #videoStage.on{display:flex}
+    #videoStage .stage-top{flex-shrink:0;display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-bottom:1px solid #222;background:#111}
+    #videoStage .stage-top .title{font-weight:700;letter-spacing:.06em;font-size:.95rem}
+    #videoStage .stage-top .meta{font-size:.75rem;color:#888}
+    #videoGrid{flex:1;display:grid;gap:10px;padding:12px;min-height:0;overflow:auto;align-content:center;justify-content:center;grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+    #videoGrid.count-1{grid-template-columns:1fr;max-width:960px;margin:0 auto;width:100%}
+    #videoGrid.count-2{grid-template-columns:1fr 1fr}
+    #videoGrid.count-3,#videoGrid.count-4{grid-template-columns:1fr 1fr}
+    .vtile{position:relative;background:#1a1a1a;border-radius:12px;overflow:hidden;border:2px solid #2a2a2a;aspect-ratio:16/10;min-height:140px}
+    .vtile.talking{border-color:#5b8def;box-shadow:0 0 16px rgba(91,141,239,.45)}
+    .vtile video{width:100%;height:100%;object-fit:cover;background:#000;display:block}
+    .vtile video.mirror{transform:scaleX(-1)}
+    .vtile .vname{position:absolute;left:8px;bottom:8px;padding:3px 10px;border-radius:6px;background:rgba(0,0,0,.65);font-size:.78rem;max-width:80%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .vtile .vbadges{position:absolute;top:8px;right:8px;display:flex;gap:4px}
+    .vtile .vbadge{width:28px;height:28px;border-radius:50%;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;font-size:14px}
+    .vtile .avatar-fallback{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:2.5rem;font-weight:700;color:#555;background:#161616}
+    .vtile.cam-off video{opacity:0}
+    #videoControls{flex-shrink:0;display:flex;align-items:center;justify-content:center;gap:10px;padding:14px 16px 18px;background:#0a0a0a;border-top:1px solid #222}
+    #videoControls .vc-btn{width:48px;height:48px;border-radius:50%;border:2px solid #444;background:#1a1a1a;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:20px}
+    #videoControls .vc-btn:hover{background:#2a2a2a;border-color:#fff}
+    #videoControls .vc-btn.off{background:#3a1515;border-color:#ff4d6a;color:#ff4d6a}
+    #videoControls .vc-btn.leave{background:#cc1f1f;border-color:#cc1f1f;width:64px;border-radius:12px;font-size:.85rem}
+
     .voice-bar .label{width:100%;font-size:.7rem;color:var(--muted)}
     .voice-peers{width:100%;font-size:.75rem;min-height:1.4em;display:flex;flex-wrap:wrap;gap:6px}
     .voice-peer{display:inline-flex;align-items:center;gap:4px;padding:3px 10px 3px 6px;background:rgba(91,141,239,.12);border-radius:999px;color:#b8d0ff;border:1px solid transparent}
@@ -220,6 +245,7 @@
         <div class="settings-box">
           <label class="chk"><input type="checkbox" id="setText" checked /> Text chat</label>
           <label class="chk"><input type="checkbox" id="setVoice" checked /> Voice chat</label>
+          <label class="chk"><input type="checkbox" id="setVideo" checked /> Video call</label>
           <label class="chk"><input type="checkbox" id="setFiles" checked /> File / image send</label>
           <button class="btn" id="applySettingsBtn" disabled style="width:100%">Apply settings</button>
         </div>
@@ -239,7 +265,8 @@
         <h2>Voice</h2>
         <div class="voice-bar" id="voiceBar">
           <div class="label">P2P · mic glow · one hash</div>
-          <button class="btn btn-voice" id="voiceJoinBtn" disabled><span class="material-symbols-outlined">mic</span> Join</button>
+          <button class="btn btn-voice" id="voiceJoinBtn" disabled><span class="material-symbols-outlined">mic</span> Voice</button>
+          <button class="btn btn-voice" id="videoJoinBtn" disabled>📹 Video</button>
           <button class="btn btn-voice" id="voiceMuteBtn" disabled><span class="material-symbols-outlined">mic_off</span> Mute</button>
           <button class="btn btn-danger" id="voiceLeaveBtn" disabled>Leave VC</button>
           <div class="voice-peers" id="voicePeers"></div>
@@ -267,6 +294,21 @@
   </main>
   
   
+  
+  <div id="videoStage">
+    <div class="stage-top">
+      <div class="title">V0RT3X · Meeting</div>
+      <div class="meta" id="videoMeta">0 participants</div>
+    </div>
+    <div id="videoGrid"></div>
+    <div id="videoControls">
+      <button type="button" class="vc-btn" id="vcMuteBtn" title="Mute">🎤</button>
+      <button type="button" class="vc-btn" id="vcCamBtn" title="Camera">📹</button>
+      <button type="button" class="vc-btn" id="vcScreenBtn" title="Share screen">🖥️</button>
+      <button type="button" class="vc-btn leave" id="vcLeaveBtn" title="Leave">Leave</button>
+    </div>
+  </div>
+
   <div id="newChatModal"><div class="modal-box">
     <h3>Start chat</h3>
     <label class="chk"><input type="checkbox" id="ncEncrypted" checked /> Encrypted (AES)</label>
@@ -327,7 +369,9 @@ const els={
   connectBtn:$("connectBtn"),disconnectBtn:$("disconnectBtn"),
   msgInput:$("msgInput"),sendBtn:$("sendBtn"),messages:$("messages"),
   statusText:$("statusText"),connDot:$("connDot"),encDot:$("encDot"),voiceDot:$("voiceDot"),
-  voiceBar:$("voiceBar"),voiceJoinBtn:$("voiceJoinBtn"),voiceMuteBtn:$("voiceMuteBtn"),
+  voiceBar:$("voiceBar"),voiceJoinBtn:$("voiceJoinBtn"),videoJoinBtn:$("videoJoinBtn"),voiceMuteBtn:$("voiceMuteBtn"),
+  videoStage:$("videoStage"),videoGrid:$("videoGrid"),videoMeta:$("videoMeta"),
+  vcMuteBtn:$("vcMuteBtn"),vcCamBtn:$("vcCamBtn"),vcScreenBtn:$("vcScreenBtn"),vcLeaveBtn:$("vcLeaveBtn"),
   voiceLeaveBtn:$("voiceLeaveBtn"),voicePeers:$("voicePeers"),myIdLine:$("myIdLine"),
   setText:$("setText"),setVoice:$("setVoice"),setFiles:$("setFiles"),applySettingsBtn:$("applySettingsBtn"),
   aclEnabled:$("aclEnabled"),aclGuests:$("aclGuests"),aclText:$("aclText"),applyAclBtn:$("applyAclBtn"),
@@ -343,7 +387,7 @@ const MAX_FILE=1.5*1024*1024;
 let ws=null,aesKey=null,connected=false,authed=false;
 let myId=crypto.randomUUID().slice(0,8),myIpId=null,mySid=null;
 let currentRoomKey="",myName="user";
-let roomSettings={text:true,voice:true,files:true};
+let roomSettings={text:true,voice:true,video:true,files:true};
 let roomCreatorId=null; // only this id may change settings/ACL
 let htmlMode=false;
 let monacoEditor=null;
@@ -355,7 +399,7 @@ const online=new Map(),receipts=new Map();
 const msgStore=new Map();
 let _sendingMsg=false;
 const UNSEND_MS=5*60*1000;
-let inVoice=false,muted=false,localStream=null;
+let inVoice=false,muted=false,camOff=false,wantVideo=false,localStream=null,screenStream=null;
 const peers=new Map();
 const rtcConfig={iceServers:[{urls:"stun:stun.l.google.com:19302"},{urls:"stun:stun1.l.google.com:19302"}]};
 let localAnalyser=null,localAudioCtx=null,volRaf=null;
@@ -736,21 +780,30 @@ function updateVoicePeersUI(){
   els.voicePeers.innerHTML="";els.voicePeers.appendChild(frag);
 }
 function setPeerTalking(id,level){
-  const el=els.voicePeers.querySelector(`[data-id="${id}"]`);if(!el)return;
-  if(level>0.04){el.classList.add("talking");const g=Math.min(1,level*3);el.style.boxShadow=`0 0 ${6+g*14}px rgba(91,141,239,${0.25+g*.55})`;}
-  else{el.classList.remove("talking");el.style.boxShadow="";}
+  const el=els.voicePeers&&els.voicePeers.querySelector(`[data-id="${id}"]`);
+  if(el){
+    if(level>0.04){el.classList.add("talking");const g=Math.min(1,level*3);el.style.boxShadow=`0 0 ${6+g*14}px rgba(91,141,239,${0.25+g*.55})`;}
+    else{el.classList.remove("talking");el.style.boxShadow="";}
+  }
+  const tile=els.videoGrid&&els.videoGrid.querySelector(`.vtile[data-id="${id}"]`);
+  if(tile) tile.classList.toggle("talking", level>0.04);
 }
 function setVoiceUI(){
-  const ok=roomSettings.voice&&can("voice");
-  els.voiceBar.classList.toggle("on",inVoice);
-  els.voiceJoinBtn.disabled=!connected||!authed||inVoice||!ok;
-  els.voiceMuteBtn.disabled=!inVoice;els.voiceLeaveBtn.disabled=!inVoice;
-  els.voiceMuteBtn.classList.toggle("active",muted);updateVoicePeersUI();
-  setStatus(connected?(inVoice?"connected · voice on":"connected · encrypted"):"disconnected",connected,!!aesKey,inVoice);
+  const okVoice=roomSettings.voice&&can("voice");
+  const okVideo=roomSettings.video!==false;
+  if(els.voiceBar) els.voiceBar.classList.toggle("on",inVoice);
+  if(els.voiceJoinBtn) els.voiceJoinBtn.disabled=!connected||!authed||inVoice||!okVoice;
+  if(els.videoJoinBtn) els.videoJoinBtn.disabled=!connected||!authed||inVoice||!okVideo;
+  if(els.voiceMuteBtn){els.voiceMuteBtn.disabled=!inVoice;els.voiceMuteBtn.classList.toggle("active",muted);}
+  if(els.voiceLeaveBtn) els.voiceLeaveBtn.disabled=!inVoice;
+  if(els.vcMuteBtn){els.vcMuteBtn.classList.toggle("off",muted);els.vcMuteBtn.textContent=muted?"🔇":"🎤";}
+  if(els.vcCamBtn){els.vcCamBtn.classList.toggle("off",camOff);els.vcCamBtn.textContent=camOff?"📷":"📹";}
+  updateVoicePeersUI();
+  setStatus(connected?(inVoice?(wantVideo?"connected · video":"connected · voice"):"connected · encrypted"):"disconnected",connected,!!aesKey,inVoice);
 }
 function isRoomCreator(){ return !!roomCreatorId && roomCreatorId===myId; }
 function applySettingsToUI(){
-  els.setText.checked=roomSettings.text;els.setVoice.checked=roomSettings.voice;els.setFiles.checked=roomSettings.files;
+  els.setText.checked=roomSettings.text;els.setVoice.checked=roomSettings.voice;if(els.setVideo)els.setVideo.checked=roomSettings.video!==false;els.setFiles.checked=roomSettings.files;
   const canText=connected&&authed&&roomSettings.text&&can("write");
   const canFiles=connected&&authed&&roomSettings.files&&can("files");
   els.msgInput.disabled=!canText;els.sendBtn.disabled=!canText;
@@ -759,7 +812,7 @@ function applySettingsToUI(){
   const creatorOk=connected&&authed&&isRoomCreator();
   els.applySettingsBtn.disabled=!creatorOk;
   els.applyAclBtn.disabled=!creatorOk;
-  els.setText.disabled=!creatorOk;els.setVoice.disabled=!creatorOk;els.setFiles.disabled=!creatorOk;
+  els.setText.disabled=!creatorOk;els.setVoice.disabled=!creatorOk;if(els.setVideo)els.setVideo.disabled=!creatorOk;els.setFiles.disabled=!creatorOk;
   els.aclEnabled.disabled=!creatorOk;els.aclGuests.disabled=!creatorOk;els.aclText.disabled=!creatorOk;
   if(!(roomSettings.voice&&can("voice"))&&inVoice)leaveVoice(false);
   setVoiceUI();
@@ -1233,50 +1286,205 @@ async function handleFiles(list){
   if(blocked)addMessage({type:"system",text:blocked+" file(s) blocked by size limit."});
 }
 
-async function joinVoice(){
-  if(!connected||!authed||inVoice||!roomSettings.voice||!can("voice"))return;
-  try{localStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true},video:false});}
-  catch{addMessage({type:"system",text:"Mic permission denied"});return;}
-  inVoice=true;muted=false;startLocalVolume();if(!volRaf)volRaf=requestAnimationFrame(volumeLoop);
-  setVoiceUI();addMessage({type:"system",text:"Joined voice"});sendRaw({t:"voice-join",u:myName,id:myId,ipId:myIpId});
+
+async function joinVoice(){ return startAV(false); }
+async function joinVideo(){ return startAV(true); }
+
+async function startAV(withVideo){
+  if(!connected||!authed||inVoice)return;
+  if(withVideo){
+    if(roomSettings.video===false){addMessage({type:"system",text:"Video disabled in room"});return;}
+  } else {
+    if(!roomSettings.voice||!can("voice")){addMessage({type:"system",text:"Voice disabled"});return;}
+  }
+  wantVideo=!!withVideo;
+  const constraints={
+    audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true},
+    video: withVideo ? {width:{ideal:1280},height:{ideal:720},facingMode:"user"} : false
+  };
+  try{
+    localStream=await navigator.mediaDevices.getUserMedia(constraints);
+  }catch(e){
+    if(withVideo){
+      try{
+        localStream=await navigator.mediaDevices.getUserMedia({audio:constraints.audio,video:false});
+        wantVideo=false;
+        addMessage({type:"system",text:"Camera unavailable — audio only"});
+      }catch(e2){
+        addMessage({type:"system",text:"Mic/camera permission denied"});
+        return;
+      }
+    } else {
+      addMessage({type:"system",text:"Mic permission denied"});
+      return;
+    }
+  }
+  inVoice=true; muted=false; camOff=!wantVideo;
+  startLocalVolume();
+  if(!volRaf) volRaf=requestAnimationFrame(volumeLoop);
+  showVideoStage(true);
+  renderVideoGrid();
+  setVoiceUI();
+  addMessage({type:"system",text:wantVideo?"Joined video meeting":"Joined voice"});
+  sendRaw({t:"voice-join",u:myName,id:myId,ipId:myIpId,video:!!wantVideo});
 }
+
 function leaveVoice(silent){
-  if(!inVoice&&!localStream)return;inVoice=false;muted=false;
-  for(const[id]of peers)removePeer(id);peers.clear();
-  if(localStream){localStream.getTracks().forEach(t=>t.stop());localStream=null;}
+  if(!inVoice&&!localStream)return;
+  inVoice=false; muted=false; camOff=false; wantVideo=false;
+  for(const[id]of peers) removePeer(id);
+  peers.clear();
+  if(screenStream){try{screenStream.getTracks().forEach(tr=>tr.stop());}catch(_){}screenStream=null;}
+  if(localStream){localStream.getTracks().forEach(tr=>tr.stop());localStream=null;}
   if(localAudioCtx){try{localAudioCtx.close();}catch(_){}localAudioCtx=null;localAnalyser=null;}
-  if(!silent&&connected){sendRaw({t:"voice-leave",id:myId});addMessage({type:"system",text:"Left voice"});}
+  showVideoStage(false);
+  if(!silent&&connected){sendRaw({t:"voice-leave",id:myId});addMessage({type:"system",text:"Left meeting"});}
   setVoiceUI();
 }
-function toggleMute(){if(!localStream)return;muted=!muted;localStream.getAudioTracks().forEach(t=>{t.enabled=!muted;});setVoiceUI();}
+
+function toggleMute(){
+  if(!localStream)return;
+  muted=!muted;
+  localStream.getAudioTracks().forEach(tr=>{tr.enabled=!muted;});
+  setVoiceUI();
+  renderVideoGrid();
+}
+
+function toggleCam(){
+  if(!localStream)return;
+  const vtracks=localStream.getVideoTracks();
+  if(!vtracks.length){
+    navigator.mediaDevices.getUserMedia({video:{width:{ideal:1280},height:{ideal:720},facingMode:"user"}}).then(async stream=>{
+      const vt=stream.getVideoTracks()[0];
+      if(!vt)return;
+      localStream.addTrack(vt);
+      wantVideo=true; camOff=false;
+      for(const[pid,entry] of peers){
+        try{
+          entry.pc.addTrack(vt, localStream);
+          entry.makingOffer=true;
+          const offer=await entry.pc.createOffer();
+          await entry.pc.setLocalDescription(offer);
+          sendRaw({t:"signal",id:myId,to:pid,u:myName,kind:"offer",payload:entry.pc.localDescription});
+        }catch(err){console.warn(err);}
+        finally{entry.makingOffer=false;}
+      }
+      renderVideoGrid(); setVoiceUI();
+    }).catch(()=>addMessage({type:"system",text:"Could not enable camera"}));
+    return;
+  }
+  camOff=!camOff;
+  vtracks.forEach(tr=>{tr.enabled=!camOff;});
+  renderVideoGrid(); setVoiceUI();
+}
+
+async function toggleScreen(){
+  if(!inVoice)return;
+  try{
+    if(screenStream){
+      screenStream.getTracks().forEach(tr=>tr.stop());
+      screenStream=null;
+      const cam=localStream&&localStream.getVideoTracks()[0];
+      for(const[pid,entry] of peers){
+        const sender=entry.pc.getSenders().find(s=>s.track&&s.track.kind==="video");
+        if(sender&&cam) try{ await sender.replaceTrack(cam); }catch(_){}
+      }
+      renderVideoGrid();
+      return;
+    }
+    screenStream=await navigator.mediaDevices.getDisplayMedia({video:true,audio:false});
+    const dt=screenStream.getVideoTracks()[0];
+    dt.onended=()=>{ if(screenStream) toggleScreen(); };
+    for(const[pid,entry] of peers){
+      const sender=entry.pc.getSenders().find(s=>s.track&&s.track.kind==="video");
+      if(sender) try{ await sender.replaceTrack(dt); }
+      catch(_){ try{ entry.pc.addTrack(dt, screenStream); }catch(__){} }
+    }
+    renderVideoGrid();
+  }catch(e){
+    addMessage({type:"system",text:"Screen share cancelled or blocked"});
+  }
+}
+
+function showVideoStage(on){
+  if(!els.videoStage)return;
+  els.videoStage.classList.toggle("on",!!on);
+}
+
+function renderVideoGrid(){
+  if(!els.videoGrid)return;
+  const tiles=[];
+  if(inVoice&&localStream){
+    tiles.push({id:myId,name:myName+" (you)",stream:screenStream||localStream,mirror:!screenStream&&wantVideo&&!camOff,camOff:camOff&&!screenStream,muted,self:true});
+  }
+  for(const[id,p] of peers){
+    tiles.push({id,name:p.name||id,stream:p.stream||null,mirror:false,camOff:!p.stream||!p.hasVideo,muted:false,self:false});
+  }
+  const n=Math.max(tiles.length,1);
+  els.videoGrid.className="count-"+Math.min(n,4);
+  els.videoGrid.innerHTML="";
+  for(const tile of tiles){
+    const div=document.createElement("div");
+    div.className="vtile"+(tile.camOff?" cam-off":"");
+    div.dataset.id=tile.id;
+    const fallback=document.createElement("div");
+    fallback.className="avatar-fallback";
+    fallback.textContent=(tile.name||"?").slice(0,1).toUpperCase();
+    div.appendChild(fallback);
+    if(tile.stream){
+      const vid=document.createElement("video");
+      vid.autoplay=true; vid.playsInline=true; vid.muted=!!tile.self;
+      if(tile.mirror) vid.classList.add("mirror");
+      vid.srcObject=tile.stream;
+      vid.play().catch(()=>{});
+      div.appendChild(vid);
+    }
+    const name=document.createElement("div");
+    name.className="vname";
+    name.textContent=tile.name||tile.id;
+    div.appendChild(name);
+    const badges=document.createElement("div");
+    badges.className="vbadges";
+    if(tile.muted){const b=document.createElement("div");b.className="vbadge";b.textContent="🔇";badges.appendChild(b);}
+    if(tile.camOff){const b=document.createElement("div");b.className="vbadge";b.textContent="📷";badges.appendChild(b);}
+    div.appendChild(badges);
+    els.videoGrid.appendChild(div);
+  }
+  if(els.videoMeta) els.videoMeta.textContent=tiles.length+" participant"+(tiles.length===1?"":"s");
+  updateVoicePeersUI();
+}
+
 function ensurePeer(id,name,initiator){
   if(id===myId||peers.has(id)||!inVoice||!localStream)return;
   const pc=new RTCPeerConnection(rtcConfig);
-  // Perfect negotiation: lower id is polite
-  const polite=myId<id;
-  const entry={pc,name:name||id,audio:null,analyser:null,polite,makingOffer:false,ignoreOffer:false};
-  peers.set(id,entry);updateVoicePeersUI();
-  localStream.getTracks().forEach(t=>{try{pc.addTrack(t,localStream);}catch(_){}});
+  const polite=String(myId)<String(id);
+  const entry={pc,name:name||id,audio:null,stream:null,hasVideo:false,analyser:null,polite,makingOffer:false,ignoreOffer:false,_peerId:id};
+  peers.set(id,entry); updateVoicePeersUI();
+  localStream.getTracks().forEach(tr=>{try{pc.addTrack(tr,localStream);}catch(_){}});
+  if(screenStream) screenStream.getVideoTracks().forEach(tr=>{try{pc.addTrack(tr,screenStream);}catch(_){}});
   pc.onicecandidate=ev=>{
     if(ev.candidate) sendRaw({t:"signal",id:myId,to:id,u:myName,kind:"ice",payload:ev.candidate});
   };
   pc.ontrack=ev=>{
-    const stream=ev.streams[0]||new MediaStream([ev.track]);
-    let audio=entry.audio;
-    if(!audio){
-      audio=document.createElement("audio");
-      audio.autoplay=true; audio.playsInline=true;
-      document.body.appendChild(audio);
-      entry.audio=audio;
+    if(!entry.stream) entry.stream=new MediaStream();
+    entry.stream.addTrack(ev.track);
+    if(ev.track.kind==="video") entry.hasVideo=true;
+    if(ev.track.kind==="audio"){
+      let audio=entry.audio;
+      if(!audio){
+        audio=document.createElement("audio");
+        audio.autoplay=true; audio.playsInline=true;
+        document.body.appendChild(audio);
+        entry.audio=audio;
+      }
+      audio.srcObject=entry.stream;
+      audio.play().catch(()=>{});
+      startRemoteVolume(entry);
     }
-    audio.srcObject=stream;
-    audio.play().catch(()=>{});
-    startRemoteVolume(entry);
+    renderVideoGrid();
   };
   pc.onconnectionstatechange=()=>{
-    if(pc.connectionState==="failed"||pc.connectionState==="closed"||pc.connectionState==="disconnected"){
-      if(pc.connectionState==="failed") removePeer(id);
-    }
+    if(pc.connectionState==="failed"||pc.connectionState==="closed") removePeer(id);
   };
   pc.onnegotiationneeded=async()=>{
     try{
@@ -1287,12 +1495,12 @@ function ensurePeer(id,name,initiator){
     finally{entry.makingOffer=false;}
   };
   if(initiator){
-    // kick negotiation
     pc.createOffer().then(o=>pc.setLocalDescription(o)).then(()=>{
       sendRaw({t:"signal",id:myId,to:id,u:myName,kind:"offer",payload:pc.localDescription});
     }).catch(console.error);
   }
 }
+
 async function handleSignal(data){
   if(!inVoice||!localStream)return;
   if(data.to&&data.to!==myId)return;
@@ -1316,13 +1524,16 @@ async function handleSignal(data){
     }
   }catch(e){ console.warn("signal",e); }
 }
+
 function removePeer(id){
-  const entry=peers.get(id);if(!entry)return;try{entry.pc.close();}catch(_){}
+  const entry=peers.get(id);if(!entry)return;
+  try{entry.pc.close();}catch(_){}
   if(entry.audioCtx)try{entry.audioCtx.close();}catch(_){}
   if(entry.audio){entry.audio.srcObject=null;entry.audio.remove();}
-  peers.delete(id);updateVoicePeersUI();
+  peers.delete(id);
+  renderVideoGrid();
+  updateVoicePeersUI();
 }
-
 
 // ── Emoji (Unicode only — no Chrome picker / license issues) ──
 const EMOJIS="😀😁😂🤣😃😄😅😆😉😊😋😎😍😘🥰😗🙂🤗🤩🤔🤨😐😑😶🙄😏😣😥😮🤐😯😪😫🥱😴😌😛😜😝🤤😒😓😔😕🙃🤑😲🙁😖😞😟😤😢😭😦😧😨😩🤯😬😰😱🥵🥶😳🤪😵😠😡🤬😷🤒🤕🤢🤮🤧😇🥳🥺🤡🤠😈💀👻👽🤖💩🔥✨⭐🌟💯🎉👍👎👏🙌👋🤝✌️🤞🤟💪❤️🧡💛💚💙💜🖤🤍💔💕💖💗💘".split(/(?:)/u).filter(x=>x.trim());
@@ -1440,8 +1651,14 @@ els.msgInput.onkeydown=e=>{
 };
 els.msgInput.addEventListener("input", onComposerInput);
 
-els.voiceJoinBtn.onclick=joinVoice;els.voiceLeaveBtn.onclick=()=>leaveVoice(false);els.voiceMuteBtn.onclick=toggleMute;
-els.applySettingsBtn.onclick=()=>{if(!isRoomCreator()){addMessage({type:"system",text:"Only the room creator can change settings."});return;}roomSettings={text:els.setText.checked,voice:els.setVoice.checked,files:els.setFiles.checked};sendRaw({t:"settings",id:myId,settings:roomSettings});applySettingsToUI();addMessage({type:"system",text:"Settings applied"});};
+els.voiceJoinBtn.onclick=joinVoice;
+if(els.videoJoinBtn) els.videoJoinBtn.onclick=joinVideo;
+els.voiceLeaveBtn.onclick=()=>leaveVoice(false);els.voiceMuteBtn.onclick=toggleMute;
+if(els.vcMuteBtn) els.vcMuteBtn.onclick=toggleMute;
+if(els.vcCamBtn) els.vcCamBtn.onclick=toggleCam;
+if(els.vcScreenBtn) els.vcScreenBtn.onclick=toggleScreen;
+if(els.vcLeaveBtn) els.vcLeaveBtn.onclick=()=>leaveVoice(false);
+els.applySettingsBtn.onclick=()=>{if(!isRoomCreator()){addMessage({type:"system",text:"Only the room creator can change settings."});return;}roomSettings={text:els.setText.checked,voice:els.setVoice.checked,video:els.setVideo?els.setVideo.checked:true,files:els.setFiles.checked};sendRaw({t:"settings",id:myId,settings:roomSettings});applySettingsToUI();addMessage({type:"system",text:"Settings applied"});};
 els.applyAclBtn.onclick=()=>{
   if(!isRoomCreator()){addMessage({type:"system",text:"Only the room creator can change accounts."});return;}
   const accounts=parseAclText(els.aclText.value);
