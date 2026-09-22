@@ -111,6 +111,11 @@
     .msg.own .meta{justify-content:flex-end}
     .msg .user{color:var(--text);font-weight:600;text-shadow:0 0 6px rgba(255,255,255,.25)}
     .msg .ipid{font-size:.62rem;color:#555}
+    .msg .tag{font-size:.6rem;padding:1px 5px;border-radius:4px;margin-left:4px;border:1px solid #333}
+    .msg .tag.same-dev{border-color:#5b8def;color:#7eb6ff}
+    .msg .tag.same-ip{border-color:#2fce56;color:#6fdd8a}
+    .msg .tag.admin{border-color:#ffcc00;color:#ffcc00}
+
     .msg .reads{font-size:.65rem;color:#666;margin-top:4px}
     .msg .file-card{margin-top:6px;padding:8px 10px;background:rgba(255,255,255,.06);border-radius:10px;border:1px solid #333;display:flex;align-items:center;gap:10px}
     .msg .file-card img{max-width:220px;max-height:180px;border-radius:8px;display:block}
@@ -223,7 +228,10 @@
         <h2>Identity</h2>
         <label for="username">Username</label>
         <input id="username" placeholder="anon" maxlength="24" />
-        <div class="id-line" id="myIdLine">hash: —</div>
+        <div class="id-line" id="myIdLine">join: —</div>
+        <div class="id-line" id="myDevLine">device: —</div>
+        <div class="id-line" id="myIpLine">net: —</div>
+        <div class="id-line" id="roomPhaseLine">phase: lobby</div>
       </div>
       <div>
         <h2>Room = WSS Link</h2>
@@ -248,6 +256,14 @@
           <label class="chk"><input type="checkbox" id="setVideo" checked /> Video call</label>
           <label class="chk"><input type="checkbox" id="setFiles" checked /> File / image send</label>
           <button class="btn" id="applySettingsBtn" disabled style="width:100%">Apply settings</button>
+        </div>
+      </div>
+      <div id="hostPanel" style="display:none">
+        <h2>Host (admin)</h2>
+        <div class="settings-box">
+          <p class="hint">Your device = cloud. Last 40 msgs in IndexedDB. Joiners get history only when you broadcast.</p>
+          <button class="btn" id="startRoomBtn" style="width:100%">Start room + broadcast history</button>
+          <button class="btn" id="bcastHistBtn" style="width:100%">Broadcast history now</button>
         </div>
       </div>
       <div>
@@ -372,7 +388,7 @@ const els={
   voiceBar:$("voiceBar"),voiceJoinBtn:$("voiceJoinBtn"),videoJoinBtn:$("videoJoinBtn"),voiceMuteBtn:$("voiceMuteBtn"),
   videoStage:$("videoStage"),videoGrid:$("videoGrid"),videoMeta:$("videoMeta"),
   vcMuteBtn:$("vcMuteBtn"),vcCamBtn:$("vcCamBtn"),vcScreenBtn:$("vcScreenBtn"),vcLeaveBtn:$("vcLeaveBtn"),
-  voiceLeaveBtn:$("voiceLeaveBtn"),voicePeers:$("voicePeers"),myIdLine:$("myIdLine"),
+  voiceLeaveBtn:$("voiceLeaveBtn"),voicePeers:$("voicePeers"),myIdLine:$("myIdLine"),myDevLine:$("myDevLine"),myIpLine:$("myIpLine"),roomPhaseLine:$("roomPhaseLine"),hostPanel:$("hostPanel"),startRoomBtn:$("startRoomBtn"),bcastHistBtn:$("bcastHistBtn"),
   setText:$("setText"),setVoice:$("setVoice"),setFiles:$("setFiles"),applySettingsBtn:$("applySettingsBtn"),
   aclEnabled:$("aclEnabled"),aclGuests:$("aclGuests"),aclText:$("aclText"),applyAclBtn:$("applyAclBtn"),
   attachBtn:$("attachBtn"),folderBtn:$("folderBtn"),fileInput:$("fileInput"),folderInput:$("folderInput"),
@@ -382,7 +398,118 @@ const els={
   editArea:$("editArea"),editInput:$("editInput"),editSaveBtn:$("editSaveBtn"),editCancelBtn:$("editCancelBtn"),
   loginGate:$("loginGate"),loginUser:$("loginUser"),loginPass:$("loginPass"),
   loginBtn:$("loginBtn"),loginCancel:$("loginCancel"),loginHint:$("loginHint"),
-};
+}
+
+function stableDeviceId(){
+  try{
+    let d=localStorage.getItem("v0rt3x_device_id");
+    if(d&&d.length>=8) return d;
+    d=(typeof uuid==="function"?uuid():String(Math.random())).replace(/-/g,"").slice(0,16);
+    localStorage.setItem("v0rt3x_device_id", d);
+    return d;
+  }catch(_){ return "dev"+Math.random().toString(16).slice(2,10); }
+}
+async function hashStr(s){
+  try{
+    const buf=await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+    return [...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,"0")).join("").slice(0,10);
+  }catch(_){
+    let h=0; for(let i=0;i<s.length;i++) h=((h<<5)-h)+s.charCodeAt(i)|0;
+    return ("0000000000"+(h>>>0).toString(16)).slice(-10);
+  }
+}
+const myDeviceRaw=stableDeviceId();
+let myDeviceHash=myDeviceRaw.slice(0,10);
+hashStr("v0rt3x-device|"+myDeviceRaw).then(h=>{ myDeviceHash=h; try{ if(typeof els!=="undefined"&&els.myDevLine) els.myDevLine.textContent="device: "+h; }catch(_){}});
+
+let roomStarted=false;
+const HOST_HIST_MAX=40;
+const HOST_IDB_KEY="v0rt3x_host_hist";
+
+function isAdmin(){ return !!roomCreatorId && roomCreatorId===myId; }
+
+async function hostSaveLast40(){
+  if(!isAdmin()||!roomStarted) return;
+  const arr=[...msgStore.entries()].filter(([,m])=>!m.localDeleted&&!m.unsent&&m.text);
+  arr.sort((a,b)=>(a[1].ts||0)-(b[1].ts||0));
+  const lines=[];
+  for(const [mid,m] of arr.slice(-HOST_HIST_MAX)){
+    lines.push({mid,u:m.senderName,id:m.senderId,text:m.text,isHtml:m.isHtml,ts:m.ts,iso:new Date(m.ts||Date.now()).toISOString(),deviceHash:m.deviceHash||null,ipId:m.ipId||null});
+  }
+  try{
+    const db=await idbOpen();
+    await new Promise((res,rej)=>{
+      const tx=db.transaction("conversations","readwrite");
+      tx.objectStore("conversations").put({
+        id: HOST_IDB_KEY+"|"+(currentRoomKey||"default"),
+        title: "host:"+(currentRoomKey||""),
+        roomKey: currentRoomKey,
+        updated: Date.now(),
+        hostLines: lines,
+        isHostLive: true
+      });
+      tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error);
+    });
+  }catch(e){ console.warn("host save", e); }
+}
+
+async function hostLoadLast40(){
+  try{
+    const all=await idbAllConvs();
+    const key=HOST_IDB_KEY+"|"+(currentRoomKey||"default");
+    const rec=all.find(x=>x.id===key) || all.find(x=>x.isHostLive && x.roomKey===currentRoomKey);
+    return (rec && rec.hostLines) || [];
+  }catch(_){ return []; }
+}
+
+async function hostBroadcastHistory(silent){
+  if(!isAdmin()||!connected) return;
+  let lines=await hostLoadLast40();
+  const map=new Map();
+  for(const l of lines) if(l.mid) map.set(l.mid,l);
+  for(const [mid,m] of msgStore){
+    if(m.localDeleted||m.unsent||!m.text) continue;
+    map.set(mid,{mid,u:m.senderName,id:m.senderId,text:m.text,isHtml:m.isHtml,ts:m.ts,iso:new Date(m.ts||Date.now()).toISOString(),deviceHash:m.deviceHash,ipId:m.ipId});
+  }
+  lines=[...map.values()].sort((a,b)=>(a.ts||0)-(b.ts||0)).slice(-HOST_HIST_MAX);
+  const pack=JSON.stringify({lines, host:true, ts:Date.now()});
+  const c=aesKey?await encryptText(pack):pack;
+  sendRaw({t:"history",id:myId,u:myName,c, plain:!aesKey, silent:!!silent});
+  if(!silent) addMessage({type:"system",text:"Broadcast history ("+lines.length+" msgs)"});
+  await hostSaveLast40();
+}
+
+async function adminStartRoom(){
+  if(!isAdmin()){ addMessage({type:"system",text:"Only the host can start the room."}); return; }
+  for(const [mid,m] of [...msgStore.entries()]){
+    if(m.lobby){ if(m.el) m.el.remove(); msgStore.delete(mid); }
+  }
+  roomStarted=true;
+  sendRaw({t:"room-start",id:myId,u:myName});
+  const saved=await hostLoadLast40();
+  for(const line of saved){
+    if(line.mid&&msgStore.has(line.mid)) continue;
+    addMessage({type:line.id===myId?"own":"other",user:line.u||"?",text:line.text,isHtml:line.isHtml,mid:line.mid||uuid().slice(0,12),senderId:line.id,ts:line.ts,time:line.ts?new Date(line.ts).toLocaleString():nowTime(),deviceHash:line.deviceHash,ipid:line.ipId||""});
+  }
+  await hostBroadcastHistory(false);
+  updatePhaseUI();
+  addMessage({type:"system",text:"Room started — host device is the cloud."});
+}
+
+function updatePhaseUI(){
+  if(els.roomPhaseLine) els.roomPhaseLine.textContent=roomStarted?("phase: LIVE"+(isAdmin()?" · HOST":"")):("phase: lobby"+(isAdmin()?" · HOST":""));
+  if(els.hostPanel) els.hostPanel.style.display=isAdmin()?"block":"none";
+  if(els.startRoomBtn) els.startRoomBtn.disabled=!isAdmin()||roomStarted;
+  if(els.bcastHistBtn) els.bcastHistBtn.disabled=!isAdmin()||!roomStarted;
+}
+
+function identityTags(deviceHash, ipId){
+  let s="";
+  if(deviceHash&&deviceHash===myDeviceHash) s+='<span class="tag same-dev">same device</span>';
+  if(ipId&&myIpId&&ipId===myIpId) s+='<span class="tag same-ip">same net</span>';
+  return s;
+}
+;
 const MAX_FILE=1.5*1024*1024;
 let ws=null,aesKey=null,connected=false,authed=false;
 let myId=crypto.randomUUID().slice(0,8),myIpId=null,mySid=null;
@@ -576,13 +703,13 @@ function renderMarkdown(raw){
   return styleHtml+html;
 }
 
-function addMessage({type="other",user,ipid,text,time,fileHtml,mid,isHtml,senderId,ts}){
+function addMessage({type="other",user,ipid,text,time,fileHtml,mid,isHtml,senderId,ts,deviceHash,lobby,fromHistory}){
   if(mid&&msgStore.has(mid)&&type!=="system")return msgStore.get(mid).el;
   const div=document.createElement("div");div.className="msg "+type;if(mid)div.dataset.mid=mid;
   if(type==="system"){ div.textContent=text; }
   else{
     const meta=document.createElement("div");meta.className="meta";
-    meta.innerHTML=`<span class="user">${esc(user||"?")}</span>${ipid?`<span class="ipid">${esc(ipid)}</span>`:""}<span>${time||""}</span><span class="edited-tag" data-edited style="display:none">(edited)</span>`;
+    meta.innerHTML=`<span class="user">${esc(user||"?")}</span>${(senderId&&roomCreatorId&&senderId===roomCreatorId)?'<span class="tag admin">admin</span>':""}${typeof identityTags==="function"?identityTags(deviceHash,ipid):""}<span class="ipid">${deviceHash?esc(String(deviceHash).slice(0,6)):""}${ipid?(deviceHash?" · ":"")+esc(ipid):""}</span><span>${time||""}</span><span class="edited-tag" data-edited style="display:none">(edited)</span>`;
     div.appendChild(meta);
     const bodyWrap=document.createElement("div");
     bodyWrap.className="msg-body-wrap";
@@ -613,7 +740,8 @@ function addMessage({type="other",user,ipid,text,time,fileHtml,mid,isHtml,sender
       const sid=senderId||(type==="own"?myId:null);
       msgStore.set(mid,{
         text:text||"", isHtml:!!isHtml, senderId:sid, senderName:user||"?",
-        ts:ts||Date.now(), history:[], el:div, fileHtml:fileHtml||null, type
+        ts:ts||Date.now(), history:[], el:div, fileHtml:fileHtml||null, type,
+        deviceHash:deviceHash||null, ipId:ipid||null, lobby:!!lobby
       });
     }
   }
@@ -846,18 +974,20 @@ function parseAclText(text){
 }
 async function finishAuth(){
   authed=true;els.loginGate.classList.remove("on");
-  online.set(myId,{u:myName,ipId:myIpId});
+  online.set(myId,{u:myName,ipId:myIpId,deviceHash:myDeviceHash});
   if(!roomCreatorId){
     roomCreatorId=myId;
     sendRaw({t:"creator",id:myId});
-    addMessage({type:"system",text:"You are the room creator (settings locked to you)."});
+    addMessage({type:"system",text:"You are the HOST. Device = cloud. Start room when ready."});
   }
   applySettingsToUI();
-  addMessage({type:"system",text:"Joined as "+(accountName||myName)+(myIpId?" · "+myIpId:"")});
-  sendRaw({t:"join",u:myName,id:myId,ipId:myIpId,account:accountName});
-  if(isRoomCreator()){
+  updatePhaseUI();
+  addMessage({type:"system",text:"Joined as "+(accountName||myName)+" · join "+myId+" · device "+myDeviceHash+(myIpId?" · net "+myIpId:"")+(isAdmin()?" · HOST":"")});
+  sendRaw({t:"join",u:myName,id:myId,ipId:myIpId,deviceHash:myDeviceHash,account:accountName});
+  if(isAdmin()){
     sendRaw({t:"settings",id:myId,settings:roomSettings});
     if(acl.enabled) sendRaw({t:"acl",id:myId,acl});
+    if(roomStarted) sendRaw({t:"room-start",id:myId,u:myName});
   }
 }
 async function tryLogin(){
@@ -1117,6 +1247,8 @@ if($("unpublishRoomBtn"))$("unpublishRoomBtn").onclick=()=>unpublishCurrentRoom(
 renderSavedRelays();renderTabBar();
 
 function connect(){
+  myId=(typeof uuid==="function"?uuid():Math.random().toString(16).slice(2)).replace(/-/g,"").slice(0,8);
+
   const url=els.relay.value.trim(),pass=els.passphrase.value;
   myName=claimUsername((els.username.value.trim()||"user").slice(0,24));
   els.username.value=myName;localStorage.setItem("v0rt3x_username",myName);
@@ -1132,8 +1264,11 @@ function connect(){
       let data;try{data=JSON.parse(ev.data);}catch{return;}if(!data)return;
       if(data.t==="hello"){
         myIpId=data.ipId||null;mySid=data.sid||myId;
-        els.myIdLine.textContent=myIpId?("hash: "+myIpId):"hash: (update worker for IP lock)";
-        if(myIpId&&ipTaken(myIpId,myId)){addMessage({type:"system",text:"Network hash already in room. Blocked."});ws.close();return;}
+        els.myIdLine.textContent="join: "+myId;
+        if(els.myDevLine) els.myDevLine.textContent="device: "+myDeviceHash;
+        if(els.myIpLine) els.myIpLine.textContent=myIpId?("net: "+myIpId):"net: (no relay hash)";
+        updatePhaseUI();
+        
         connected=true;els.disconnectBtn.disabled=false;els.applySettingsBtn.disabled=false;els.applyAclBtn.disabled=false;
         if($("saveRelayBtn"))$("saveRelayBtn").disabled=false;
         if($("publishRoomBtn"))$("publishRoomBtn").disabled=false;
@@ -1151,7 +1286,7 @@ function connect(){
       }
       if(!authed&&data.t!=="hello"&&data.t!=="acl")return;
       if(data.t==="join"&&data.id!==myId){
-        online.set(data.id,{u:data.u||"?",ipId:data.ipId||null});
+        online.set(data.id,{u:data.u||"?",ipId:data.ipId||null,deviceHash:data.deviceHash||null});
         addMessage({type:"system",text:(data.u||"someone")+" joined"});
         if(inVoice&&data.id)ensurePeer(data.id,data.u||"?",true);
         if(isRoomCreator()){
@@ -1180,7 +1315,8 @@ function connect(){
         if(mid&&msgStore.has(mid))return;
         if(data.id===myId)return;
         let plain;if(data.plain||!aesKey)plain=data.c;else{plain=await decryptText(data.c);if(plain===null)return;}
-        addMessage({type:"other",user:data.u||"?",ipid:data.ipId||"",text:plain,time:data.ts?new Date(data.ts).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}):nowTime(),mid,isHtml:!!data.html||plain.trimStart().startsWith("<"),senderId:data.id,ts:data.ts||Date.now()});
+        addMessage({type:"other",user:data.u||"?",ipid:data.ipId||"",text:plain,time:data.ts?new Date(data.ts).toLocaleString():nowTime(),mid,isHtml:!!data.html||plain.trimStart().startsWith("<"),senderId:data.id,ts:data.ts||Date.now(),deviceHash:data.deviceHash,lobby:!roomStarted});
+        if(typeof isAdmin==="function"&&isAdmin()&&roomStarted) hostSaveLast40();
         if(mid&&can("read"))sendRaw({t:"read",mid,id:myId,u:myName,ts:Date.now()});return;
       }
       if(data.t==="read"&&data.mid&&data.id!==myId){
@@ -1191,11 +1327,18 @@ function connect(){
         if(!roomSettings.files||!can("read"))return;
         try{const plain=await decryptText(data.c);if(!plain)return;const obj=JSON.parse(plain);showFile(data.u||"?",obj.name,obj.mime,b64dec(obj.b64),false,data.ipId);}catch(e){console.warn(e);}return;
       }
+      if(data.t==="room-start"&&data.id){
+        roomStarted=true;
+        for(const [mid,m] of [...msgStore.entries()]){ if(m.lobby){ if(m.el) m.el.remove(); msgStore.delete(mid); } }
+        updatePhaseUI();
+        if(data.id!==myId) addMessage({type:"system",text:"Host started the room"});
+        return;
+      }
       if(data.t==="history"&&data.c&&data.id!==myId){
-        try{const plain=await decryptText(data.c);if(!plain)return;const pack=JSON.parse(plain);
+        try{let plain;if(data.plain||!aesKey)plain=data.c;else plain=await decryptText(data.c);if(!plain)return;const pack=JSON.parse(plain);
           for(const line of(pack.lines||[])){if(line.mid&&msgStore.has(line.mid))continue;
-            addMessage({type:line.id===myId?"own":"other",user:line.u||"?",text:line.text,isHtml:line.isHtml,mid:line.mid||uuid().slice(0,12),senderId:line.id,ts:line.ts,time:line.ts?new Date(line.ts).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}):""});}
-          addMessage({type:"system",text:"History from "+(data.u||"peer")});}catch(e){console.warn(e);}return;}
+            addMessage({type:line.id===myId?"own":"other",user:line.u||"?",text:line.text,isHtml:line.isHtml,mid:line.mid||(typeof uuid==="function"?uuid():String(Math.random())).slice(0,12),senderId:line.id,ts:line.ts,time:line.ts?new Date(line.ts).toLocaleString():"",deviceHash:line.deviceHash,ipid:line.ipId||"",fromHistory:true});}
+          if(!data.silent) addMessage({type:"system",text:"History from host"});}catch(e){console.warn(e);}return;}
       if(data.t==="unsend"&&data.mid){
         if(data.id!==myId) applyUnsend(data.mid, data.u||"Someone");
         return;
@@ -1211,7 +1354,7 @@ function connect(){
       if(data.t==="voice-join"&&data.id!==myId){if(inVoice)ensurePeer(data.id,data.u||"?",true);}
     };
     ws.onclose=()=>{
-      connected=false;authed=false;leaveVoice(true);aesKey=null;myIpId=null;roomCreatorId=null;online.clear();
+      connected=false;authed=false;leaveVoice(true);aesKey=null;myIpId=null;roomCreatorId=null;roomStarted=false;online.clear();try{updatePhaseUI();}catch(_){}
       els.connectBtn.disabled=false;els.disconnectBtn.disabled=true;els.applySettingsBtn.disabled=true;els.applyAclBtn.disabled=true;
       els.loginGate.classList.remove("on");els.myIdLine.textContent="hash: —";applySettingsToUI();setStatus("disconnected",false,false,false);
       addMessage({type:"system",text:"Disconnected"});
@@ -1242,8 +1385,9 @@ async function sendMessage(){
     if(msgStore.has(mid))return;
     const isHtml=text.trimStart().startsWith("<");
     const payload=aesKey?await encryptText(text):text;
-    sendRaw({t:"msg",mid,u:myName,id:myId,ipId:myIpId,ts:Date.now(),c:payload,html:!!isHtml,plain:!aesKey});
-    addMessage({type:"own",user:myName,ipid:myIpId||"",text,time:nowTime(),mid,isHtml,senderId:myId,ts:Date.now()});
+    sendRaw({t:"msg",mid,u:myName,id:myId,ipId:myIpId,deviceHash:myDeviceHash,ts:Date.now(),c:payload,html:!!isHtml,plain:!aesKey});
+    addMessage({type:"own",user:myName,ipid:myIpId||"",text,time:new Date().toLocaleString(),mid,isHtml,senderId:myId,ts:Date.now(),deviceHash:myDeviceHash,lobby:!roomStarted});
+    if(typeof isAdmin==="function"&&isAdmin()&&roomStarted) hostSaveLast40();
     receipts.set(mid,[]);
     if(typeof setComposerText==="function")setComposerText("");
     else{els.msgInput.value="";}
@@ -1651,6 +1795,8 @@ els.msgInput.onkeydown=e=>{
 };
 els.msgInput.addEventListener("input", onComposerInput);
 
+if(els.startRoomBtn) els.startRoomBtn.onclick=()=>adminStartRoom();
+if(els.bcastHistBtn) els.bcastHistBtn.onclick=()=>hostBroadcastHistory(false);
 els.voiceJoinBtn.onclick=joinVoice;
 if(els.videoJoinBtn) els.videoJoinBtn.onclick=joinVideo;
 els.voiceLeaveBtn.onclick=()=>leaveVoice(false);els.voiceMuteBtn.onclick=toggleMute;
