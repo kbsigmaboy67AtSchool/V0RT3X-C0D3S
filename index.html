@@ -67,6 +67,20 @@
 
     #videoStage{display:none;position:fixed;inset:0;z-index:80;background:#0b0b0b;flex-direction:column;font-family:var(--font)}
     #videoStage.on{display:flex}
+
+    .vtile.screen-share{position:relative}
+    .vtile .pip-cam{
+      position:absolute;top:10px;right:10px;width:22%;max-width:180px;min-width:96px;
+      aspect-ratio:16/10;border-radius:10px;overflow:hidden;border:2px solid #fff;
+      box-shadow:0 4px 18px rgba(0,0,0,.55);z-index:5;background:#111;
+    }
+    .vtile .pip-cam video{width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
+    .vtile .pip-cam .pip-label{
+      position:absolute;left:6px;bottom:4px;font-size:0.65rem;color:#fff;
+      text-shadow:0 1px 3px #000;pointer-events:none
+    }
+    .vtile video.screen-main{object-fit:contain;background:#000}
+
     #videoStage .stage-top{flex-shrink:0;display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-bottom:1px solid #222;background:#111}
     #videoStage .stage-top .title{font-weight:700;letter-spacing:.06em;font-size:.95rem}
     #videoStage .stage-top .meta{font-size:.75rem;color:#888}
@@ -530,7 +544,15 @@ const UNSEND_MS=5*60*1000;
 let inVoice=false,muted=false,camOff=false,wantVideo=false,localStream=null,screenStream=null;
 const inVoicePeers=new Set();
 const peers=new Map();
-const rtcConfig={iceServers:[{urls:"stun:stun.l.google.com:19302"},{urls:"stun:stun1.l.google.com:19302"}]};
+const rtcConfig={
+  iceServers:[
+    {urls:"stun:stun.l.google.com:19302"},
+    {urls:"stun:stun1.l.google.com:19302"},
+    {urls:"stun:stun2.l.google.com:19302"},
+    {urls:"stun:stun.cloudflare.com:3478"}
+  ],
+  iceCandidatePoolSize:4
+};
 let localAnalyser=null,localAudioCtx=null,volRaf=null;
 (function(){const u=localStorage.getItem("v0rt3x_username");els.username.value=u||"user";})();
 els.username.addEventListener("change",()=>{localStorage.setItem("v0rt3x_username",(els.username.value.trim()||"user").slice(0,24));});
@@ -950,8 +972,14 @@ function setVoiceUI(){
   if(els.voiceLeaveBtn) els.voiceLeaveBtn.disabled=!inVoice;
   if(els.vcMuteBtn){els.vcMuteBtn.classList.toggle("off",muted);els.vcMuteBtn.textContent=muted?"🔇":"🎤";}
   if(els.vcCamBtn){els.vcCamBtn.classList.toggle("off",camOff);els.vcCamBtn.textContent=camOff?"📷":"📹";}
+  if(els.vcScreenBtn){
+    els.vcScreenBtn.classList.toggle("off",!screenStream);
+    els.vcScreenBtn.style.outline=screenStream?"2px solid #5b8def":"";
+    els.vcScreenBtn.title=screenStream?"Stop sharing":"Share screen (ChromeOS ready)";
+  }
   updateVoicePeersUI();
-  setStatus(connected?(inVoice?(wantVideo?"connected · video":"connected · voice"):"connected · encrypted"):"disconnected",connected,!!aesKey,inVoice);
+  const mode=inVoice?(screenStream?"connected · screen":(wantVideo?"connected · video":"connected · voice")):(connected?"connected · encrypted":"disconnected");
+  setStatus(mode,connected,!!aesKey,inVoice);
 }
 function isRoomCreator(){ return !!roomCreatorId && roomCreatorId===myId; }
 function applySettingsToUI(){
@@ -1393,7 +1421,16 @@ function connect(){
         inVoicePeers.add(data.id);
         if(inVoice){
           ensurePeer(data.id,data.u||"?", true);
-          if(wantVideo){ showVideoStage(true); renderVideoGrid(); }
+          if(wantVideo||data.video||data.screen){ showVideoStage(true); renderVideoGrid(); }
+          // if they started screen/video after we connected, force a re-offer from us if we are polite
+          if(peers.has(data.id)&&(data.video||data.screen)){
+            const entry=peers.get(data.id);
+            if(entry&&entry.polite){
+              entry.pc.createOffer().then(o=>entry.pc.setLocalDescription(o)).then(()=>{
+                sendRaw({t:"signal",id:myId,to:data.id,u:myName,kind:"offer",payload:entry.pc.localDescription});
+              }).catch(()=>{});
+            }
+          }
         }
         return;
       }
@@ -1563,26 +1600,28 @@ async function startAV(withVideo){
     if(!roomSettings.voice||!can("voice")){addMessage({type:"system",text:"Voice disabled"});return;}
   }
   wantVideo=!!withVideo;
-  const constraints={
-    audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true},
-    video: withVideo ? {width:{ideal:1280},height:{ideal:720},facingMode:"user"} : false
-  };
+  const audioC={echoCancellation:true,noiseSuppression:true,autoGainControl:true};
+  const videoC={width:{ideal:1280},height:{ideal:720},frameRate:{ideal:30},facingMode:"user"};
   try{
-    localStream=await navigator.mediaDevices.getUserMedia(constraints);
-  }catch(e){
     if(withVideo){
       try{
-        localStream=await navigator.mediaDevices.getUserMedia({audio:constraints.audio,video:false});
-        wantVideo=false;
-        addMessage({type:"system",text:"Camera unavailable — audio only"});
-      }catch(e2){
-        addMessage({type:"system",text:"Mic/camera permission denied"});
-        return;
+        localStream=await navigator.mediaDevices.getUserMedia({audio:audioC,video:videoC});
+      }catch(e1){
+        // try audio+video without facingMode (ChromeOS quirks)
+        try{
+          localStream=await navigator.mediaDevices.getUserMedia({audio:audioC,video:true});
+        }catch(e2){
+          localStream=await navigator.mediaDevices.getUserMedia({audio:audioC,video:false});
+          wantVideo=false;
+          addMessage({type:"system",text:"Camera unavailable — audio only ("+(e2.name||"")+")"});
+        }
       }
     } else {
-      addMessage({type:"system",text:"Mic permission denied"});
-      return;
+      localStream=await navigator.mediaDevices.getUserMedia({audio:audioC,video:false});
     }
+  }catch(e){
+    addMessage({type:"system",text:"Mic/camera permission denied: "+(e.name||e.message||"")});
+    return;
   }
   inVoice=true; muted=false; camOff=!wantVideo;
   startLocalVolume();
@@ -1592,9 +1631,14 @@ async function startAV(withVideo){
   setVoiceUI();
   addMessage({type:"system",text:wantVideo?"Joined video meeting":"Joined voice"});
   inVoicePeers.add(myId);
-  sendRaw({t:"voice-join",u:myName,id:myId,ipId:myIpId,video:!!wantVideo});
-  // connect to anyone already in voice (from presence map online)
-  for(const [pid,info] of online){ if(pid!==myId && inVoicePeers.has(pid)) ensurePeer(pid, info.u||"?", true); }
+  sendRaw({t:"voice-join",u:myName,id:myId,ipId:myIpId,video:!!wantVideo,screen:false});
+  // Connect to everyone already marked in voice
+  for(const [pid,info] of online){
+    if(pid!==myId) ensurePeer(pid, (info&&info.u)||"?", true);
+  }
+  for(const pid of inVoicePeers){
+    if(pid!==myId) ensurePeer(pid, "peer", true);
+  }
 }
 
 
@@ -1620,57 +1664,133 @@ function toggleMute(){
   renderVideoGrid();
 }
 
+async function renegotiateAll(){
+  for(const[pid,entry] of peers){
+    try{
+      if(!entry.pc||entry.pc.signalingState==="closed") continue;
+      if(entry.pc.signalingState!=="stable") continue;
+      if(entry.makingOffer) continue;
+      entry.makingOffer=true;
+      const offer=await entry.pc.createOffer();
+      if(entry.pc.signalingState!=="stable"){ entry.makingOffer=false; continue; }
+      await entry.pc.setLocalDescription(offer);
+      sendRaw({t:"signal",id:myId,to:pid,u:myName,kind:"offer",payload:entry.pc.localDescription});
+    }catch(e){console.warn("renego",e);}
+    finally{ const e2=peers.get(pid); if(e2) e2.makingOffer=false; }
+  }
+}
+
+/** Prefer replaceTrack on existing video sender — never addTrack after first offer (m-line order). */
+async function setOutboundVideoTrack(track){
+  for(const[,entry] of peers){
+    try{
+      let sender=entry._videoSender;
+      if(!sender){
+        sender=entry.pc.getSenders().find(s=>s.track&&s.track.kind==="video")
+          || entry.pc.getSenders().find(s=>s.track===null && entry.pc.getTransceivers().some(tr=>tr.sender===s && tr.receiver.track&&tr.receiver.track.kind==="video"));
+      }
+      if(!sender){
+        const tx=entry.pc.getTransceivers().find(tr=>tr.receiver&&tr.receiver.track&&tr.receiver.track.kind==="video")
+          || entry.pc.getTransceivers().find(tr=>tr.mid!==null&&tr.sender);
+        // find video transceiver by kind via currentDirection or mid order
+        for(const tr of entry.pc.getTransceivers()){
+          if(tr.sender && (tr.sender.track===null || (tr.sender.track&&tr.sender.track.kind==="video") || (tr.receiver.track&&tr.receiver.track.kind==="video"))){
+            // Prefer transceiver that is not the audio one
+            if(tr.sender.track&&tr.sender.track.kind==="audio") continue;
+            sender=tr.sender; break;
+          }
+        }
+      }
+      if(sender){
+        entry._videoSender=sender;
+        await sender.replaceTrack(track);
+      }
+    }catch(e){console.warn("setOutboundVideoTrack",e);}
+  }
+}
+
+async function ensureVideoSender(track, stream){
+  await setOutboundVideoTrack(track||null);
+  await new Promise(r=>setTimeout(r,50));
+  await renegotiateAll();
+}
+
 function toggleCam(){
-  if(!localStream)return;
-  const vtracks=localStream.getVideoTracks();
-  if(!vtracks.length){
-    navigator.mediaDevices.getUserMedia({video:{width:{ideal:1280},height:{ideal:720},facingMode:"user"}}).then(async stream=>{
+  if(!localStream||!inVoice)return;
+  if(camOff || !localStream.getVideoTracks().some(tr=>tr.readyState==="live"&&tr.enabled)){
+    navigator.mediaDevices.getUserMedia({
+      video:{width:{ideal:1280},height:{ideal:720},facingMode:"user"},
+      audio:false
+    }).then(async stream=>{
       const vt=stream.getVideoTracks()[0];
-      if(!vt)return;
+      localStream.getVideoTracks().forEach(tr=>{try{tr.stop();localStream.removeTrack(tr);}catch(_){}});
       localStream.addTrack(vt);
       wantVideo=true; camOff=false;
-      for(const[pid,entry] of peers){
-        try{
-          entry.pc.addTrack(vt, localStream);
-          entry.makingOffer=true;
-          const offer=await entry.pc.createOffer();
-          await entry.pc.setLocalDescription(offer);
-          sendRaw({t:"signal",id:myId,to:pid,u:myName,kind:"offer",payload:entry.pc.localDescription});
-        }catch(err){console.warn(err);}
-        finally{entry.makingOffer=false;}
-      }
+      if(!els.videoStage.classList.contains("on")) showVideoStage(true);
+      if(!screenStream) await ensureVideoSender(vt, localStream);
       renderVideoGrid(); setVoiceUI();
-    }).catch(()=>addMessage({type:"system",text:"Could not enable camera"}));
-    return;
+      sendRaw({t:"voice-join",u:myName,id:myId,ipId:myIpId,video:true,screen:!!screenStream});
+    }).catch(e=>{
+      addMessage({type:"system",text:"Camera denied: "+(e.message||e.name||"")});
+    });
+  } else {
+    localStream.getVideoTracks().forEach(tr=>{tr.enabled=false;});
+    camOff=true;
+    if(!screenStream) setOutboundVideoTrack(null).then(()=>renegotiateAll());
+    renderVideoGrid(); setVoiceUI();
   }
-  camOff=!camOff;
-  vtracks.forEach(tr=>{tr.enabled=!camOff;});
-  renderVideoGrid(); setVoiceUI();
 }
 
 async function toggleScreen(){
-  if(!inVoice)return;
+  if(!inVoice||!localStream){
+    addMessage({type:"system",text:"Join voice/video first to share screen"});
+    return;
+  }
   try{
     if(screenStream){
-      screenStream.getTracks().forEach(tr=>tr.stop());
+      screenStream.getTracks().forEach(tr=>{try{tr.stop();}catch(_){}});
       screenStream=null;
-      const cam=localStream&&localStream.getVideoTracks()[0];
-      for(const[pid,entry] of peers){
-        const sender=entry.pc.getSenders().find(s=>s.track&&s.track.kind==="video");
-        if(sender&&cam) try{ await sender.replaceTrack(cam); }catch(_){}
-      }
+      const cam=localStream.getVideoTracks().find(tr=>tr.readyState==="live");
+      if(cam && !camOff) await ensureVideoSender(cam, localStream);
+      else await ensureVideoSender(null, localStream);
       renderVideoGrid();
+      setVoiceUI();
+      addMessage({type:"system",text:"Screen share stopped"});
       return;
     }
-    screenStream=await navigator.mediaDevices.getDisplayMedia({video:true,audio:false});
-    const dt=screenStream.getVideoTracks()[0];
-    dt.onended=()=>{ if(screenStream) toggleScreen(); };
-    for(const[pid,entry] of peers){
-      const sender=entry.pc.getSenders().find(s=>s.track&&s.track.kind==="video");
-      if(sender) try{ await sender.replaceTrack(dt); }
-      catch(_){ try{ entry.pc.addTrack(dt, screenStream); }catch(__){} }
+
+    let stream=null;
+    const attempts=[
+      {
+        video:{ displaySurface:"monitor", frameRate:{ideal:30,max:30}, width:{ideal:1920}, height:{ideal:1080} },
+        audio:true, selfBrowserSurface:"exclude", surfaceSwitching:"include", systemAudio:"include", preferCurrentTab:false
+      },
+      { video:{ displaySurface:"window", frameRate:{ideal:30} }, audio:true, selfBrowserSurface:"exclude" },
+      { video:true, audio:true },
+      { video:true, audio:false }
+    ];
+    let lastErr=null;
+    for(const opts of attempts){
+      try{ stream=await navigator.mediaDevices.getDisplayMedia(opts); break; }
+      catch(e){ lastErr=e; }
     }
+    if(!stream){
+      addMessage({type:"system",text:"Screen share blocked: "+(lastErr&&(lastErr.message||lastErr.name)||"denied")});
+      return;
+    }
+    screenStream=stream;
+    const dt=screenStream.getVideoTracks()[0];
+    if(!dt){ addMessage({type:"system",text:"No screen video track"}); return; }
+    try{ dt.contentHint="detail"; }catch(_){}
+    dt.onended=()=>{ if(screenStream) toggleScreen(); };
+
+    await ensureVideoSender(dt, screenStream);
+
+    showVideoStage(true);
     renderVideoGrid();
+    setVoiceUI();
+    sendRaw({t:"voice-join",u:myName,id:myId,ipId:myIpId,video:!!wantVideo,screen:true});
+    addMessage({type:"system",text:"Sharing screen"});
   }catch(e){
     addMessage({type:"system",text:"Screen share cancelled or blocked"});
   }
@@ -1685,17 +1805,32 @@ function renderVideoGrid(){
   if(!els.videoGrid)return;
   const tiles=[];
   if(inVoice&&localStream){
-    tiles.push({id:myId,name:myName+" (you)",stream:screenStream||localStream,mirror:!screenStream&&wantVideo&&!camOff,camOff:camOff&&!screenStream,muted,self:true});
+    const sharing=!!screenStream;
+    const camTrack=localStream.getVideoTracks().find(tr=>tr.readyState==="live");
+    const showCamPip=sharing && wantVideo && !camOff && camTrack;
+    tiles.push({
+      id:myId,
+      name:myName+" (you)"+(sharing?" · screen":""),
+      stream: sharing ? screenStream : localStream,
+      mirror: !sharing && wantVideo && !camOff,
+      camOff: !sharing && (camOff || !wantVideo || !camTrack),
+      muted, self:true, screen:sharing,
+      pipStream: showCamPip ? localStream : null
+    });
   }
   for(const[id,p] of peers){
-    tiles.push({id,name:p.name||id,stream:p.stream||null,mirror:false,camOff:!p.stream||!p.hasVideo,muted:false,self:false});
+    const hasV=!!(p.stream&&p.stream.getVideoTracks().some(tr=>tr.readyState!=="ended"));
+    tiles.push({
+      id,name:p.name||id,stream:p.stream||null,mirror:false,
+      camOff:!hasV, muted:false, self:false, screen:!!p.screen, pipStream:null
+    });
   }
   const n=Math.max(tiles.length,1);
   els.videoGrid.className="count-"+Math.min(n,4);
   els.videoGrid.innerHTML="";
   for(const tile of tiles){
     const div=document.createElement("div");
-    div.className="vtile"+(tile.camOff?" cam-off":"");
+    div.className="vtile"+(tile.camOff?" cam-off":"")+(tile.screen?" screen-share":"");
     div.dataset.id=tile.id;
     const fallback=document.createElement("div");
     fallback.className="avatar-fallback";
@@ -1705,9 +1840,24 @@ function renderVideoGrid(){
       const vid=document.createElement("video");
       vid.autoplay=true; vid.playsInline=true; vid.muted=!!tile.self;
       if(tile.mirror) vid.classList.add("mirror");
+      if(tile.screen) vid.classList.add("screen-main");
       vid.srcObject=tile.stream;
       vid.play().catch(()=>{});
       div.appendChild(vid);
+    }
+    if(tile.pipStream){
+      const pip=document.createElement("div");
+      pip.className="pip-cam";
+      const pv=document.createElement("video");
+      pv.autoplay=true; pv.playsInline=true; pv.muted=true;
+      pv.srcObject=tile.pipStream;
+      pv.play().catch(()=>{});
+      pip.appendChild(pv);
+      const lab=document.createElement("div");
+      lab.className="pip-label";
+      lab.textContent="You";
+      pip.appendChild(lab);
+      div.appendChild(pip);
     }
     const name=document.createElement("div");
     name.className="vname";
@@ -1716,7 +1866,8 @@ function renderVideoGrid(){
     const badges=document.createElement("div");
     badges.className="vbadges";
     if(tile.muted){const b=document.createElement("div");b.className="vbadge";b.textContent="🔇";badges.appendChild(b);}
-    if(tile.camOff){const b=document.createElement("div");b.className="vbadge";b.textContent="📷";badges.appendChild(b);}
+    if(tile.camOff&&!tile.screen){const b=document.createElement("div");b.className="vbadge";b.textContent="📷";badges.appendChild(b);}
+    if(tile.screen){const b=document.createElement("div");b.className="vbadge";b.textContent="🖥️";badges.appendChild(b);}
     div.appendChild(badges);
     els.videoGrid.appendChild(div);
   }
@@ -1728,17 +1879,47 @@ function ensurePeer(id,name,initiator){
   if(id===myId||peers.has(id)||!inVoice||!localStream)return;
   const pc=new RTCPeerConnection(rtcConfig);
   const polite=String(myId)<String(id);
-  const entry={pc,name:name||id,audio:null,stream:null,hasVideo:false,analyser:null,polite,makingOffer:false,ignoreOffer:false,_peerId:id};
+  const entry={
+    pc,name:name||id,audio:null,stream:null,hasVideo:false,screen:false,
+    analyser:null,polite,makingOffer:false,ignoreOffer:false,_peerId:id,
+    _videoSender:null,_audioSender:null,_negoTimer:null
+  };
   peers.set(id,entry); updateVoicePeersUI();
-  localStream.getTracks().forEach(tr=>{try{pc.addTrack(tr,localStream);}catch(_){}});
-  if(screenStream) screenStream.getVideoTracks().forEach(tr=>{try{pc.addTrack(tr,screenStream);}catch(_){}});
+
+  // FIXED m-line order: audio transceiver/track first, then video — never addTrack later
+  try{
+    const a=localStream.getAudioTracks()[0]||null;
+    if(a) entry._audioSender=pc.addTrack(a, localStream);
+    else pc.addTransceiver("audio",{direction:"sendrecv"});
+  }catch(_){ try{ pc.addTransceiver("audio",{direction:"sendrecv"}); }catch(__){} }
+
+  let videoTrack=null;
+  if(screenStream&&screenStream.getVideoTracks()[0]) videoTrack=screenStream.getVideoTracks()[0];
+  else if(localStream.getVideoTracks().length) videoTrack=localStream.getVideoTracks()[0];
+
+  try{
+    if(videoTrack){
+      const ms=(screenStream&&videoTrack===screenStream.getVideoTracks()[0])?screenStream:localStream;
+      entry._videoSender=pc.addTrack(videoTrack, ms);
+    } else {
+      const tx=pc.addTransceiver("video",{direction:"sendrecv"});
+      entry._videoSender=tx.sender;
+    }
+  }catch(e){console.warn("video setup",e);}
+
   pc.onicecandidate=ev=>{
     if(ev.candidate) sendRaw({t:"signal",id:myId,to:id,u:myName,kind:"ice",payload:ev.candidate});
   };
   pc.ontrack=ev=>{
     if(!entry.stream) entry.stream=new MediaStream();
-    entry.stream.addTrack(ev.track);
-    if(ev.track.kind==="video") entry.hasVideo=true;
+    if(!entry.stream.getTracks().some(t=>t.id===ev.track.id)) entry.stream.addTrack(ev.track);
+    if(ev.track.kind==="video"){
+      entry.hasVideo=true;
+      try{
+        const set=ev.track.getSettings&&ev.track.getSettings();
+        if(set&&set.displaySurface) entry.screen=true;
+      }catch(_){}
+    }
     if(ev.track.kind==="audio"){
       let audio=entry.audio;
       if(!audio){
@@ -1751,23 +1932,42 @@ function ensurePeer(id,name,initiator){
       audio.play().catch(()=>{});
       startRemoteVolume(entry);
     }
+    if(wantVideo||entry.hasVideo||screenStream) showVideoStage(true);
     renderVideoGrid();
   };
   pc.onconnectionstatechange=()=>{
     if(pc.connectionState==="failed"||pc.connectionState==="closed") removePeer(id);
   };
-  pc.onnegotiationneeded=async()=>{
-    try{
-      entry.makingOffer=true;
-      await pc.setLocalDescription(await pc.createOffer());
-      sendRaw({t:"signal",id:myId,to:id,u:myName,kind:"offer",payload:pc.localDescription});
-    }catch(e){console.warn("nego",e);}
-    finally{entry.makingOffer=false;}
+  // Debounced negotiation only — no second immediate createOffer path fighting this
+  pc.onnegotiationneeded=()=>{
+    if(entry._negoTimer) clearTimeout(entry._negoTimer);
+    entry._negoTimer=setTimeout(async()=>{
+      if(!peers.has(id)) return;
+      if(entry.makingOffer) return;
+      if(pc.signalingState!=="stable") return;
+      if(!initiator && !entry.polite) return;
+      try{
+        entry.makingOffer=true;
+        const offer=await pc.createOffer();
+        if(pc.signalingState!=="stable") return;
+        await pc.setLocalDescription(offer);
+        sendRaw({t:"signal",id:myId,to:id,u:myName,kind:"offer",payload:pc.localDescription});
+      }catch(e){console.warn("nego",e);}
+      finally{entry.makingOffer=false;}
+    },120);
   };
   if(initiator){
-    pc.createOffer().then(o=>pc.setLocalDescription(o)).then(()=>{
-      sendRaw({t:"signal",id:myId,to:id,u:myName,kind:"offer",payload:pc.localDescription});
-    }).catch(console.error);
+    setTimeout(async()=>{
+      if(!peers.has(id)||entry.makingOffer) return;
+      if(pc.signalingState!=="stable") return;
+      try{
+        entry.makingOffer=true;
+        const offer=await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        sendRaw({t:"signal",id:myId,to:id,u:myName,kind:"offer",payload:pc.localDescription});
+      }catch(e){console.warn("init offer",e);}
+      finally{entry.makingOffer=false;}
+    },180);
   }
 }
 
@@ -1783,12 +1983,16 @@ async function handleSignal(data){
       const offerCollision=(entry.makingOffer||pc.signalingState!=="stable");
       entry.ignoreOffer=!entry.polite && offerCollision;
       if(entry.ignoreOffer) return;
+      if(offerCollision && entry.polite && pc.signalingState!=="stable"){
+        try{ await pc.setLocalDescription({type:"rollback"}); }catch(_){}
+      }
       await pc.setRemoteDescription(data.payload);
       const answer=await pc.createAnswer();
       await pc.setLocalDescription(answer);
       sendRaw({t:"signal",id:myId,to:from,u:myName,kind:"answer",payload:pc.localDescription});
     } else if(data.kind==="answer"){
-      await pc.setRemoteDescription(data.payload);
+      if(pc.signalingState==="have-local-offer")
+        await pc.setRemoteDescription(data.payload);
     } else if(data.kind==="ice"&&data.payload){
       try{ await pc.addIceCandidate(data.payload); }catch(e){ if(!entry.ignoreOffer) console.warn(e); }
     }
@@ -1797,6 +2001,7 @@ async function handleSignal(data){
 
 function removePeer(id){
   const entry=peers.get(id);if(!entry)return;
+  if(entry._negoTimer) clearTimeout(entry._negoTimer);
   try{entry.pc.close();}catch(_){}
   if(entry.audioCtx)try{entry.audioCtx.close();}catch(_){}
   if(entry.audio){entry.audio.srcObject=null;entry.audio.remove();}
@@ -1804,6 +2009,7 @@ function removePeer(id){
   renderVideoGrid();
   updateVoicePeersUI();
 }
+
 
 // ── Emoji (Unicode only — no Chrome picker / license issues) ──
 const EMOJIS="😀😁😂🤣😃😄😅😆😉😊😋😎😍😘🥰😗🙂🤗🤩🤔🤨😐😑😶🙄😏😣😥😮🤐😯😪😫🥱😴😌😛😜😝🤤😒😓😔😕🙃🤑😲🙁😖😞😟😤😢😭😦😧😨😩🤯😬😰😱🥵🥶😳🤪😵😠😡🤬😷🤒🤕🤢🤮🤧😇🥳🥺🤡🤠😈💀👻👽🤖💩🔥✨⭐🌟💯🎉👍👎👏🙌👋🤝✌️🤞🤟💪❤️🧡💛💚💙💜🖤🤍💔💕💖💗💘".split(/(?:)/u).filter(x=>x.trim());
