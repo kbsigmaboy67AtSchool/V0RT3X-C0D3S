@@ -967,7 +967,8 @@ function setVoiceUI(){
   const okVideo=roomSettings.video!==false;
   if(els.voiceBar) els.voiceBar.classList.toggle("on",inVoice);
   if(els.voiceJoinBtn) els.voiceJoinBtn.disabled=!connected||!authed||inVoice||!okVoice;
-  if(els.videoJoinBtn) els.videoJoinBtn.disabled=!connected||!authed||inVoice||!okVideo;
+  // Video stays clickable while in voice so you can upgrade voice → video
+  if(els.videoJoinBtn) els.videoJoinBtn.disabled=!connected||!authed||!okVideo||(inVoice&&wantVideo&&!camOff);
   if(els.voiceMuteBtn){els.voiceMuteBtn.disabled=!inVoice;els.voiceMuteBtn.classList.toggle("active",muted);}
   if(els.voiceLeaveBtn) els.voiceLeaveBtn.disabled=!inVoice;
   if(els.vcMuteBtn){els.vcMuteBtn.classList.toggle("off",muted);els.vcMuteBtn.textContent=muted?"🔇":"🎤";}
@@ -1417,20 +1418,21 @@ function connect(){
       }
       if(data.t==="signal"&&data.id!==myId){handleSignal(data);return;}
       if(data.t==="voice-leave"&&data.id!==myId){inVoicePeers.delete(data.id);removePeer(data.id);return;}
+      if(data.t==="voice-sync"&&data.id!==myId){
+        // Someone asked who is in VC — re-announce if we are
+        if(inVoice){
+          sendRaw({t:"voice-join",u:myName,id:myId,ipId:myIpId,video:!!wantVideo,screen:!!screenStream});
+        }
+        return;
+      }
       if(data.t==="voice-join"&&data.id!==myId){
         inVoicePeers.add(data.id);
         if(inVoice){
-          ensurePeer(data.id,data.u||"?", true);
+          // Caller with higher id initiates to reduce glare
+          const iAmInitiator = String(myId) > String(data.id);
+          ensurePeer(data.id, data.u||"?", iAmInitiator);
           if(wantVideo||data.video||data.screen){ showVideoStage(true); renderVideoGrid(); }
-          // if they started screen/video after we connected, force a re-offer from us if we are polite
-          if(peers.has(data.id)&&(data.video||data.screen)){
-            const entry=peers.get(data.id);
-            if(entry&&entry.polite){
-              entry.pc.createOffer().then(o=>entry.pc.setLocalDescription(o)).then(()=>{
-                sendRaw({t:"signal",id:myId,to:data.id,u:myName,kind:"offer",payload:entry.pc.localDescription});
-              }).catch(()=>{});
-            }
-          }
+          addMessage({type:"system",text:"VC peer: "+(data.u||data.id)+(data.video?" · video":"")+(data.screen?" · screen":"")});
         }
         return;
       }
@@ -1593,7 +1595,21 @@ async function joinVoice(){ return startAV(false); }
 async function joinVideo(){ return startAV(true); }
 
 async function startAV(withVideo){
-  if(!connected||!authed||inVoice)return;
+  if(!connected||!authed)return;
+
+  // Already in voice: allow upgrading to video (was silent no-op before)
+  if(inVoice){
+    if(withVideo && (camOff || !localStream.getVideoTracks().some(tr=>tr.readyState==="live"))){
+      addMessage({type:"system",text:"Enabling camera…"});
+      toggleCam();
+      showVideoStage(true);
+    } else if(withVideo){
+      showVideoStage(true);
+      renderVideoGrid();
+    }
+    return;
+  }
+
   if(withVideo){
     if(roomSettings.video===false){addMessage({type:"system",text:"Video disabled in room"});return;}
   } else {
@@ -1607,7 +1623,6 @@ async function startAV(withVideo){
       try{
         localStream=await navigator.mediaDevices.getUserMedia({audio:audioC,video:videoC});
       }catch(e1){
-        // try audio+video without facingMode (ChromeOS quirks)
         try{
           localStream=await navigator.mediaDevices.getUserMedia({audio:audioC,video:true});
         }catch(e2){
@@ -1623,21 +1638,29 @@ async function startAV(withVideo){
     addMessage({type:"system",text:"Mic/camera permission denied: "+(e.name||e.message||"")});
     return;
   }
-  inVoice=true; muted=false; camOff=!wantVideo;
+
+  // Verify tracks actually exist
+  const aTracks=localStream.getAudioTracks().length;
+  const vTracks=localStream.getVideoTracks().length;
+  addMessage({type:"system",text:"Media ready · audio:"+aTracks+" video:"+vTracks});
+
+  inVoice=true; muted=false; camOff=!wantVideo || vTracks===0;
   startLocalVolume();
   if(!volRaf) volRaf=requestAnimationFrame(volumeLoop);
-  if(wantVideo){ showVideoStage(true); renderVideoGrid(); }
+  if(wantVideo||vTracks>0){ showVideoStage(true); renderVideoGrid(); }
   else { showVideoStage(false); }
   setVoiceUI();
   addMessage({type:"system",text:wantVideo?"Joined video meeting":"Joined voice"});
   inVoicePeers.add(myId);
+  // ONLY mesh with people already in voice — never all online (that stuck PCs)
   sendRaw({t:"voice-join",u:myName,id:myId,ipId:myIpId,video:!!wantVideo,screen:false});
-  // Connect to everyone already marked in voice
-  for(const [pid,info] of online){
-    if(pid!==myId) ensurePeer(pid, (info&&info.u)||"?", true);
-  }
-  for(const pid of inVoicePeers){
-    if(pid!==myId) ensurePeer(pid, "peer", true);
+  // Ask others in the room who is already in VC to re-announce
+  sendRaw({t:"voice-sync",id:myId,u:myName});
+  for(const pid of [...inVoicePeers]){
+    if(pid!==myId){
+      const info=online.get(pid);
+      ensurePeer(pid, (info&&info.u)||"peer", true);
+    }
   }
 }
 
@@ -1876,7 +1899,17 @@ function renderVideoGrid(){
 }
 
 function ensurePeer(id,name,initiator){
-  if(id===myId||peers.has(id)||!inVoice||!localStream)return;
+  if(id===myId||!inVoice||!localStream)return;
+  if(peers.has(id)){
+    const ex=peers.get(id);
+    const st=ex.pc&&ex.pc.connectionState;
+    if(st==="connected"||st==="connecting"||st==="new"){
+      // already good — if they gained video and we need renego, replaceTrack path handles it
+      return;
+    }
+    // dead peer — recreate
+    try{ removePeer(id); }catch(_){}
+  }
   const pc=new RTCPeerConnection(rtcConfig);
   const polite=String(myId)<String(id);
   const entry={
@@ -1936,7 +1969,21 @@ function ensurePeer(id,name,initiator){
     renderVideoGrid();
   };
   pc.onconnectionstatechange=()=>{
-    if(pc.connectionState==="failed"||pc.connectionState==="closed") removePeer(id);
+    const st=pc.connectionState;
+    if(st==="connected") addMessage({type:"system",text:"Media linked · "+(name||id)});
+    if(st==="failed"||st==="closed"||st==="disconnected"){
+      if(st==="failed") addMessage({type:"system",text:"Media failed · "+(name||id)+" — retrying"});
+      if(st==="failed"){
+        try{ removePeer(id); }catch(_){}
+        setTimeout(()=>{ if(inVoice&&inVoicePeers.has(id)) ensurePeer(id,name,true); },800);
+      } else if(st==="closed") removePeer(id);
+    }
+  };
+  pc.oniceconnectionstatechange=()=>{
+    const st=pc.iceConnectionState;
+    if(st==="failed"){
+      try{ pc.restartIce(); }catch(_){}
+    }
   };
   // Debounced negotiation only — no second immediate createOffer path fighting this
   pc.onnegotiationneeded=()=>{
