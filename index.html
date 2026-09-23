@@ -1725,14 +1725,32 @@ function toggleCam(){
 async function setOutboundVideoTrack(track){
   for(const[,entry] of peers){
     try{
-      const sender=entry._videoSender || entry.pc.getSenders().find(s=>!s.track||s.track.kind==="video");
-      if(sender){
-        entry._videoSender=sender;
-        await sender.replaceTrack(track);
-      }
-    }catch(e){console.warn(e);}
+      const sender = entry._videoSender;
+      if(sender) await sender.replaceTrack(track);
+    }catch(e){ console.warn("replace video", e); }
   }
 }
+
+async function setOutboundAudioTrack(track){
+  for(const[,entry] of peers){
+    try{
+      const sender = entry._audioSender;
+      if(sender) await sender.replaceTrack(track);
+    }catch(e){ console.warn("replace audio", e); }
+  }
+}
+
+function sdpPayload(desc){
+  if(!desc) return null;
+  return { type: desc.type, sdp: desc.sdp };
+}
+
+/**
+ * FIXED m-line layout on EVERY peer:
+ *   mid 0 = audio (sendrecv transceiver)
+ *   mid 1 = video (sendrecv transceiver)
+ * Tracks are applied only via replaceTrack — never addTrack after creation.
+ */
 
 async function toggleScreen(){
   if(!inVoice||!localStream){
@@ -1832,71 +1850,64 @@ function renderVideoGrid(){
   updateVoicePeersUI();
 }
 
-function sdpPayload(desc){
-  if(!desc) return null;
-  return {type:desc.type, sdp:desc.sdp};
-}
-
 function ensurePeer(id, name, initiator){
   if(id===myId || !inVoice || !localStream) return;
   if(peers.has(id)){
-    const st=peers.get(id).pc.connectionState;
-    if(st==="connected"||st==="connecting"||st==="new") return;
+    const st = peers.get(id).pc.connectionState;
+    if(st==="connected" || st==="connecting" || st==="new") return;
     try{ removePeer(id); }catch(_){}
   }
   addMessage({type:"system",text:(initiator?"Calling":"Answering")+" "+(name||id)+"…"});
 
-  const pc=new RTCPeerConnection(rtcConfig);
+  const pc = new RTCPeerConnection(rtcConfig);
   const polite = String(myId) < String(id);
-  const entry={
-    pc, name:name||id, stream:null, audio:null, hasVideo:false, screen:false,
-    polite, makingOffer:false, ignoreOffer:false, isSettingRemote:false,
-    _videoSender:null, _audioSender:null, _peerId:id
+  const entry = {
+    pc, name: name||id, stream: null, audio: null, hasVideo: false, screen: false,
+    polite, makingOffer: false, ignoreOffer: false, _peerId: id,
+    _audioSender: null, _videoSender: null, _ready: false
   };
   peers.set(id, entry);
 
-  // Always: audio track + video track-or-transceiver (stable m-line order)
-  try{
-    const a=localStream.getAudioTracks()[0];
-    if(a) entry._audioSender=pc.addTrack(a, localStream);
-    else pc.addTransceiver("audio",{direction:"sendrecv"});
-  }catch(_){}
+  // ALWAYS identical order — both peers, offerer and answerer
+  const audioTx = pc.addTransceiver("audio", { direction: "sendrecv" });
+  const videoTx = pc.addTransceiver("video", { direction: "sendrecv" });
+  entry._audioSender = audioTx.sender;
+  entry._videoSender = videoTx.sender;
 
-  try{
-    let vt=null, ms=localStream;
-    if(screenStream && screenStream.getVideoTracks()[0]){
-      vt=screenStream.getVideoTracks()[0]; ms=screenStream;
-    } else if(localStream.getVideoTracks()[0]){
-      vt=localStream.getVideoTracks()[0];
-    }
-    if(vt) entry._videoSender=pc.addTrack(vt, ms);
-    else {
-      const tx=pc.addTransceiver("video",{direction:"sendrecv"});
-      entry._videoSender=tx.sender;
-    }
-  }catch(_){}
+  // Attach current local tracks (replaceTrack keeps m-line stable)
+  const a = localStream.getAudioTracks().find(tr => tr.readyState==="live") || null;
+  let v = null;
+  if(screenStream) v = screenStream.getVideoTracks().find(tr => tr.readyState==="live") || null;
+  if(!v) v = localStream.getVideoTracks().find(tr => tr.readyState==="live" && tr.enabled) || null;
+  try{ if(a) audioTx.sender.replaceTrack(a); }catch(_){}
+  try{ if(v) videoTx.sender.replaceTrack(v); }catch(_){}
 
   pc.onicecandidate = (ev)=>{
     if(!ev.candidate) return;
     sendRaw({
       t:"signal", id:myId, to:id, u:myName, kind:"ice",
-      payload:{ candidate:ev.candidate.candidate, sdpMid:ev.candidate.sdpMid, sdpMLineIndex:ev.candidate.sdpMLineIndex, usernameFragment:ev.candidate.usernameFragment }
+      payload:{
+        candidate: ev.candidate.candidate,
+        sdpMid: ev.candidate.sdpMid,
+        sdpMLineIndex: ev.candidate.sdpMLineIndex,
+        usernameFragment: ev.candidate.usernameFragment
+      }
     });
   };
 
   pc.ontrack = (ev)=>{
-    if(!entry.stream) entry.stream=new MediaStream();
-    if(!entry.stream.getTracks().some(x=>x.id===ev.track.id))
+    if(!entry.stream) entry.stream = new MediaStream();
+    if(!entry.stream.getTracks().some(x => x.id===ev.track.id))
       entry.stream.addTrack(ev.track);
-    if(ev.track.kind==="video") entry.hasVideo=true;
+    if(ev.track.kind==="video") entry.hasVideo = true;
     if(ev.track.kind==="audio"){
       if(!entry.audio){
-        entry.audio=document.createElement("audio");
-        entry.audio.autoplay=true;
-        entry.audio.playsInline=true;
+        entry.audio = document.createElement("audio");
+        entry.audio.autoplay = true;
+        entry.audio.playsInline = true;
         document.body.appendChild(entry.audio);
       }
-      entry.audio.srcObject=entry.stream;
+      entry.audio.srcObject = entry.stream;
       entry.audio.play().catch(()=>{});
       startRemoteVolume(entry);
     }
@@ -1905,84 +1916,100 @@ function ensurePeer(id, name, initiator){
   };
 
   pc.onconnectionstatechange = ()=>{
-    const st=pc.connectionState;
+    const st = pc.connectionState;
     if(st==="connected") addMessage({type:"system",text:"✓ Linked with "+(name||id)});
     if(st==="failed"){
-      addMessage({type:"system",text:"✗ Link failed with "+(name||id)});
+      addMessage({type:"system",text:"✗ Link failed · "+(name||id)});
       try{ pc.restartIce(); }catch(_){}
     }
     if(st==="closed") removePeer(id);
   };
 
-  pc.onnegotiationneeded = async ()=>{
-    try{
+  // Perfect Negotiation — only create offers when stable, debounced
+  let negoTimer = null;
+  pc.onnegotiationneeded = ()=>{
+    if(negoTimer) clearTimeout(negoTimer);
+    negoTimer = setTimeout(async ()=>{
+      if(!peers.has(id)) return;
       if(entry.makingOffer) return;
-      entry.makingOffer=true;
-      await pc.setLocalDescription(await pc.createOffer());
-      sendRaw({t:"signal",id:myId,to:id,u:myName,kind:"offer",payload:sdpPayload(pc.localDescription)});
-    }catch(e){ console.warn("nego",e); }
-    finally{ entry.makingOffer=false; }
+      if(pc.signalingState !== "stable") return;
+      try{
+        entry.makingOffer = true;
+        const offer = await pc.createOffer();
+        // Bail if state changed during await
+        if(pc.signalingState !== "stable") return;
+        await pc.setLocalDescription(offer);
+        sendRaw({
+          t:"signal", id:myId, to:id, u:myName, kind:"offer",
+          payload: sdpPayload(pc.localDescription)
+        });
+      }catch(e){ console.warn("nego", e); }
+      finally{ entry.makingOffer = false; }
+    }, 50);
   };
 
+  entry._ready = true;
+  // Only the designated initiator kicks the first offer
   if(initiator){
-    // kick negotiation
-    pc.onnegotiationneeded();
+    setTimeout(()=>{ try{ pc.onnegotiationneeded(); }catch(_){} }, 80);
   }
 }
 
 async function handleSignal(data){
-  if(!data||!data.id||data.id===myId) return;
+  if(!data || !data.id || data.id===myId) return;
   if(data.to && data.to!==myId) return;
 
-  // If signal arrives before we joined VC, stash isn't needed — peer should re-offer on our voice-join
-  if(!inVoice||!localStream){
-    addMessage({type:"system",text:"Signal ignored (not in call yet) from "+(data.u||data.id)});
+  if(!inVoice || !localStream){
+    // Don't create half-baked peers before local media exists
     return;
   }
 
   if(!peers.has(data.id)){
-    // Create as answerer (not initiator)
+    // Remote is offering/signaling — we are answerer
     ensurePeer(data.id, data.u||data.id, false);
   }
-  const entry=peers.get(data.id);
+  const entry = peers.get(data.id);
   if(!entry) return;
-  const pc=entry.pc;
+  const pc = entry.pc;
 
   try{
-    if(data.kind==="offer" && data.payload){
-      const offerCollision = entry.makingOffer || pc.signalingState!=="stable";
+    if(data.kind==="offer" && data.payload && data.payload.sdp){
+      const offerCollision = entry.makingOffer || pc.signalingState !== "stable";
       entry.ignoreOffer = !entry.polite && offerCollision;
-      if(entry.ignoreOffer){
-        addMessage({type:"system",text:"Ignored glare offer from "+(data.u||data.id)});
-        return;
+      if(entry.ignoreOffer) return;
+
+      // Polite peer rolls back local offer on glare
+      if(offerCollision && entry.polite && pc.signalingState !== "stable"){
+        try{ await pc.setLocalDescription({ type: "rollback" }); }catch(_){}
       }
-      entry.isSettingRemote=true;
-      if(offerCollision && entry.polite){
-        try{ await pc.setLocalDescription({type:"rollback"}); }catch(_){}
-      }
-      await pc.setRemoteDescription(data.payload);
-      await pc.setLocalDescription(await pc.createAnswer());
-      entry.isSettingRemote=false;
-      sendRaw({t:"signal",id:myId,to:data.id,u:myName,kind:"answer",payload:sdpPayload(pc.localDescription)});
-    } else if(data.kind==="answer" && data.payload){
-      if(pc.signalingState==="have-local-offer"){
-        await pc.setRemoteDescription(data.payload);
-      }
+
+      await pc.setRemoteDescription({ type: "offer", sdp: data.payload.sdp });
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      sendRaw({
+        t:"signal", id:myId, to:data.id, u:myName, kind:"answer",
+        payload: sdpPayload(pc.localDescription)
+      });
+    } else if(data.kind==="answer" && data.payload && data.payload.sdp){
+      // Only apply answer if we are actually waiting for one
+      if(pc.signalingState !== "have-local-offer") return;
+      await pc.setRemoteDescription({ type: "answer", sdp: data.payload.sdp });
     } else if(data.kind==="ice" && data.payload){
       try{
-        await pc.addIceCandidate(data.payload);
+        if(data.payload.candidate)
+          await pc.addIceCandidate(data.payload);
       }catch(e){
-        if(!entry.ignoreOffer) console.warn("ice",e);
+        if(!entry.ignoreOffer) console.warn("ice", e);
       }
     }
   }catch(e){
-    addMessage({type:"system",text:"Signal error: "+(e.message||e.name||e)});
-    console.warn("signal",e);
+    console.warn("signal", e);
+    addMessage({type:"system",text:"Signal: "+(e.name||"")+" "+(e.message||"").slice(0,80)});
   }
 }
 
 function removePeer(id){
-  const entry=peers.get(id); if(!entry) return;
+  const entry = peers.get(id); if(!entry) return;
   try{ entry.pc.close(); }catch(_){}
   if(entry.audioCtx) try{ entry.audioCtx.close(); }catch(_){}
   if(entry.audio){ entry.audio.srcObject=null; entry.audio.remove(); }
