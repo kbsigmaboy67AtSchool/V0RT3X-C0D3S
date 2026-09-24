@@ -1864,17 +1864,17 @@ function ensurePeer(id, name, initiator){
   const entry = {
     pc, name: name||id, stream: null, audio: null, hasVideo: false, screen: false,
     polite, makingOffer: false, ignoreOffer: false, _peerId: id,
-    _audioSender: null, _videoSender: null, _ready: false
+    _audioSender: null, _videoSender: null,
+    pendingIce: []
   };
   peers.set(id, entry);
 
-  // ALWAYS identical order — both peers, offerer and answerer
+  // Identical m-line order on every peer
   const audioTx = pc.addTransceiver("audio", { direction: "sendrecv" });
   const videoTx = pc.addTransceiver("video", { direction: "sendrecv" });
   entry._audioSender = audioTx.sender;
   entry._videoSender = videoTx.sender;
 
-  // Attach current local tracks (replaceTrack keeps m-line stable)
   const a = localStream.getAudioTracks().find(tr => tr.readyState==="live") || null;
   let v = null;
   if(screenStream) v = screenStream.getVideoTracks().find(tr => tr.readyState==="live") || null;
@@ -1925,19 +1925,18 @@ function ensurePeer(id, name, initiator){
     if(st==="closed") removePeer(id);
   };
 
-  // Perfect Negotiation — only create offers when stable, debounced
+  // Only create offers in stable state (never during have-remote-offer)
   let negoTimer = null;
   pc.onnegotiationneeded = ()=>{
     if(negoTimer) clearTimeout(negoTimer);
     negoTimer = setTimeout(async ()=>{
       if(!peers.has(id)) return;
       if(entry.makingOffer) return;
-      if(pc.signalingState !== "stable") return;
+      if(pc.signalingState !== "stable") return; // KEY: skip if have-remote-offer etc
       try{
         entry.makingOffer = true;
         const offer = await pc.createOffer();
-        // Bail if state changed during await
-        if(pc.signalingState !== "stable") return;
+        if(pc.signalingState !== "stable") return; // re-check after await
         await pc.setLocalDescription(offer);
         sendRaw({
           t:"signal", id:myId, to:id, u:myName, kind:"offer",
@@ -1945,27 +1944,28 @@ function ensurePeer(id, name, initiator){
         });
       }catch(e){ console.warn("nego", e); }
       finally{ entry.makingOffer = false; }
-    }, 50);
+    }, 100);
   };
 
-  entry._ready = true;
-  // Only the designated initiator kicks the first offer
   if(initiator){
-    setTimeout(()=>{ try{ pc.onnegotiationneeded(); }catch(_){} }, 80);
+    setTimeout(()=>{ try{ pc.onnegotiationneeded(); }catch(_){} }, 100);
+  }
+}
+
+async function flushIce(entry){
+  if(!entry || !entry.pc || !entry.pc.remoteDescription) return;
+  const q = entry.pendingIce.splice(0);
+  for(const c of q){
+    try{ await entry.pc.addIceCandidate(c); }catch(e){ console.warn("ice flush", e); }
   }
 }
 
 async function handleSignal(data){
   if(!data || !data.id || data.id===myId) return;
   if(data.to && data.to!==myId) return;
-
-  if(!inVoice || !localStream){
-    // Don't create half-baked peers before local media exists
-    return;
-  }
+  if(!inVoice || !localStream) return;
 
   if(!peers.has(data.id)){
-    // Remote is offering/signaling — we are answerer
     ensurePeer(data.id, data.u||data.id, false);
   }
   const entry = peers.get(data.id);
@@ -1978,12 +1978,18 @@ async function handleSignal(data){
       entry.ignoreOffer = !entry.polite && offerCollision;
       if(entry.ignoreOffer) return;
 
-      // Polite peer rolls back local offer on glare
-      if(offerCollision && entry.polite && pc.signalingState !== "stable"){
+      if(offerCollision && entry.polite && pc.signalingState === "have-local-offer"){
         try{ await pc.setLocalDescription({ type: "rollback" }); }catch(_){}
       }
 
+      // Don't set remote offer if we already have one processed mid-flight
+      if(pc.signalingState === "have-remote-offer"){
+        // already processing an offer — skip duplicate
+        return;
+      }
+
       await pc.setRemoteDescription({ type: "offer", sdp: data.payload.sdp });
+      await flushIce(entry);
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
       sendRaw({
@@ -1991,20 +1997,25 @@ async function handleSignal(data){
         payload: sdpPayload(pc.localDescription)
       });
     } else if(data.kind==="answer" && data.payload && data.payload.sdp){
-      // Only apply answer if we are actually waiting for one
       if(pc.signalingState !== "have-local-offer") return;
       await pc.setRemoteDescription({ type: "answer", sdp: data.payload.sdp });
+      await flushIce(entry);
     } else if(data.kind==="ice" && data.payload){
-      try{
-        if(data.payload.candidate)
-          await pc.addIceCandidate(data.payload);
-      }catch(e){
-        if(!entry.ignoreOffer) console.warn("ice", e);
+      const cand = data.payload;
+      if(!cand || (!cand.candidate && cand.candidate!=="")) return;
+      // Queue until remote description exists
+      if(!pc.remoteDescription){
+        entry.pendingIce.push(cand);
+        return;
       }
+      try{ await pc.addIceCandidate(cand); }
+      catch(e){ if(!entry.ignoreOffer) console.warn("ice", e); }
     }
   }catch(e){
     console.warn("signal", e);
-    addMessage({type:"system",text:"Signal: "+(e.name||"")+" "+(e.message||"").slice(0,80)});
+    // Don't spam chat with every ice race
+    if(e && e.name && e.name!=="InvalidStateError")
+      addMessage({type:"system",text:"Signal: "+e.name});
   }
 }
 
