@@ -390,6 +390,7 @@
     <button class="btn" id="loginBtn" style="width:100%">Enter room</button>
     <button class="btn btn-danger" id="loginCancel" style="width:100%">Cancel</button>
   </div></div>
+<script src="https://webrtc.github.io/adapter/adapter-latest.js"></script>
 <script>
 function uuid(){if(crypto.randomUUID)try{return crypto.randomUUID();}catch(_){}
   const b=new Uint8Array(16);(crypto.getRandomValues||function(a){for(let i=0;i<a.length;i++)a[i]=Math.random()*256|0;})(b);
