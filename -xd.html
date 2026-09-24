@@ -90,7 +90,7 @@
     #videoGrid.count-3,#videoGrid.count-4{grid-template-columns:1fr 1fr}
     .vtile{position:relative;background:#1a1a1a;border-radius:12px;overflow:hidden;border:2px solid #2a2a2a;aspect-ratio:16/10;min-height:140px}
     .vtile.talking{border-color:#5b8def;box-shadow:0 0 16px rgba(91,141,239,.45)}
-    .vtile video{width:100%;height:100%;object-fit:cover;background:#000;display:block}
+    .vtile video{width:100%;height:100%;object-fit:cover;background:#000;display:block;position:relative;z-index:2}
     .vtile video.mirror{transform:scaleX(-1)}
     .vtile .vname{position:absolute;left:8px;bottom:8px;padding:3px 10px;border-radius:6px;background:rgba(0,0,0,.65);font-size:.78rem;max-width:80%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .vtile .vbadges{position:absolute;top:8px;right:8px;display:flex;gap:4px}
@@ -1853,23 +1853,29 @@ function resolvePeerName(id, fallback){
   return fallback || id;
 }
 
-/** Closest to webrtc/samples pc1 — sequential offer/answer, addTrack only, no transceiver games. */
+/** Exact pattern from webrtc/samples pc1 — use original localStream, not a copy. */
 function ensurePeer(id, name, initiator){
   if(id===myId || !inVoice || !localStream) return;
   name = resolvePeerName(id, name);
 
-  // Always rebuild peer when (re)joining video so we never keep an audio-only PC
   if(peers.has(id)){
     const ex = peers.get(id);
+    if(name) ex.name = name;
     const st = ex.pc.connectionState;
-    const localHasVideo = localStream.getVideoTracks().some(tr=>tr.readyState==="live");
-    const sendersHaveVideo = ex.pc.getSenders().some(s=>s.track && s.track.kind==="video");
-    if(st==="connected" && (!localHasVideo || sendersHaveVideo)){
-      if(name) ex.name = name;
+    // If already connected but we need video and they have none, rebuild
+    const needVideo = localStream.getVideoTracks().some(tr=>tr.readyState==="live");
+    const haveSendVideo = ex.pc.getSenders().some(s=>s.track && s.track.kind==="video" && s.track.readyState==="live");
+    const haveRecvVideo = ex.stream && ex.stream.getVideoTracks().some(tr=>tr.readyState!=="ended");
+    if((st==="connected"||st==="connecting") && (!needVideo || (haveSendVideo && haveRecvVideo))){
       renderVideoGrid();
       return;
     }
-    try{ removePeer(id); }catch(_){}
+    if(st==="connected"||st==="connecting"||st==="new"){
+      // stuck without video — tear down and retry
+      try{ removePeer(id); }catch(_){}
+    } else {
+      try{ removePeer(id); }catch(_){}
+    }
   }
 
   addMessage({type:"system",text:(initiator?"Calling":"Answering")+" "+name+"…"});
@@ -1884,22 +1890,28 @@ function ensurePeer(id, name, initiator){
   peers.set(id, entry);
   updateVoicePeersUI();
 
-  // === official sample pattern ===
-  // Add every live local track (audio + video) with ONE MediaStream
-  const tracks = [];
-  localStream.getAudioTracks().forEach(tr=>{ if(tr.readyState==="live") tracks.push(tr); });
-  if(screenStream){
-    screenStream.getTracks().forEach(tr=>{ if(tr.readyState==="live") tracks.push(tr); });
-  } else {
-    localStream.getVideoTracks().forEach(tr=>{ if(tr.readyState==="live") tracks.push(tr); });
-  }
-  const sendStream = new MediaStream(tracks);
-  tracks.forEach(tr=>{
-    try{ pc.addTrack(tr, sendStream); }catch(e){ console.warn(e); }
+  // CRITICAL (official sample): addTrack(track, localStream) — same stream object
+  localStream.getTracks().forEach(track=>{
+    if(track.readyState!=="live") return;
+    try{
+      track.enabled = true;
+      pc.addTrack(track, localStream);
+    }catch(e){ console.warn("addTrack", track.kind, e); }
   });
+  // Screen share video overrides camera if active
+  if(screenStream){
+    screenStream.getVideoTracks().forEach(track=>{
+      if(track.readyState!=="live") return;
+      const sender = pc.getSenders().find(s=>s.track && s.track.kind==="video");
+      if(sender) sender.replaceTrack(track).catch(()=>{});
+      else try{ pc.addTrack(track, screenStream); }catch(_){}
+    });
+  }
+
+  const nSend = pc.getSenders().map(s=>s.track&&s.track.kind).filter(Boolean);
+  addMessage({type:"system",text:"Local tracks on PC: "+(nSend.join(",")||"none")});
 
   pc.onicecandidate = (ev)=>{
-    // sample also sends null candidate as end-of-candidates sometimes; we only send real ones
     if(!ev.candidate) return;
     sendRaw({
       t:"signal", id:myId, to:id, u:myName, kind:"ice",
@@ -1913,7 +1925,7 @@ function ensurePeer(id, name, initiator){
   };
 
   pc.ontrack = (ev)=>{
-    // sample: remoteVideo.srcObject = e.streams[0]
+    // Official: remoteVideo.srcObject = e.streams[0]
     if(ev.streams && ev.streams[0]){
       entry.stream = ev.streams[0];
     } else if(ev.track){
@@ -1921,7 +1933,11 @@ function ensurePeer(id, name, initiator){
       if(!entry.stream.getTracks().some(x=>x.id===ev.track.id))
         entry.stream.addTrack(ev.track);
     }
-    entry.hasVideo = !!(entry.stream && entry.stream.getVideoTracks().some(tr=>tr.readyState!=="ended"));
+    if(ev.track){
+      try{ ev.track.enabled = true; }catch(_){}
+      addMessage({type:"system",text:"ontrack "+ev.track.kind+" from "+entry.name});
+    }
+    entry.hasVideo = !!(entry.stream && entry.stream.getVideoTracks().length);
 
     if(entry.stream && entry.stream.getAudioTracks().length){
       if(!entry.audio){
@@ -1946,6 +1962,20 @@ function ensurePeer(id, name, initiator){
       const vt = entry.stream ? entry.stream.getVideoTracks().length : 0;
       const at = entry.stream ? entry.stream.getAudioTracks().length : 0;
       addMessage({type:"system",text:"✓ Linked "+entry.name+" · recv a:"+at+" v:"+vt});
+      // Stats after 2s — are video bytes actually flowing?
+      setTimeout(async ()=>{
+        if(!peers.has(id)) return;
+        try{
+          const stats = await pc.getStats();
+          let vIn=0, vOut=0, aIn=0;
+          stats.forEach(r=>{
+            if(r.type==="inbound-rtp" && r.kind==="video") vIn += (r.bytesReceived||0);
+            if(r.type==="inbound-rtp" && r.kind==="audio") aIn += (r.bytesReceived||0);
+            if(r.type==="outbound-rtp" && r.kind==="video") vOut += (r.bytesSent||0);
+          });
+          addMessage({type:"system",text:"Stats · video in:"+vIn+" out:"+vOut+" audio in:"+aIn});
+        }catch(_){}
+      }, 2000);
     }
     if(st==="failed"){
       addMessage({type:"system",text:"✗ Link failed · "+entry.name});
@@ -1954,25 +1984,24 @@ function ensurePeer(id, name, initiator){
     if(st==="closed") removePeer(id);
   };
 
-  // NO onnegotiationneeded auto-loop — only explicit offer (like the sample's Call button)
   if(initiator){
     (async ()=>{
       try{
         entry.makingOffer = true;
-        // sample: createOffer({ offerToReceiveAudio:1, offerToReceiveVideo:1 })
         const offer = await pc.createOffer({
-          offerToReceiveAudio: true,
-          offerToReceiveVideo: true
+          offerToReceiveAudio: 1,
+          offerToReceiveVideo: 1
         });
         await pc.setLocalDescription(offer);
         sendRaw({
           t:"signal", id:myId, to:id, u:myName, kind:"offer",
           payload: { type: offer.type, sdp: offer.sdp }
         });
-        // Debug: does offer contain video?
         const hasV = /m=video/.test(offer.sdp||"");
         const hasA = /m=audio/.test(offer.sdp||"");
-        addMessage({type:"system",text:"Offer sent · a:"+hasA+" v:"+hasV});
+        // Check video section not rejected (port 0)
+        const vReject = /m=video 0 /.test(offer.sdp||"");
+        addMessage({type:"system",text:"Offer · a:"+hasA+" v:"+hasV+(vReject?" REJECTED":"")});
       }catch(e){
         console.warn("offer", e);
         addMessage({type:"system",text:"Offer failed: "+(e.message||e.name)});
@@ -1984,27 +2013,25 @@ function ensurePeer(id, name, initiator){
 }
 
 async function setOutboundVideoTrack(track){
-  for(const[,entry] of peers){
+  for(const[pid,entry] of peers){
     try{
-      const vs = entry.pc.getSenders().find(s => s.track && s.track.kind==="video")
-        || entry.pc.getSenders().find(s => {
-          // sender with no track that might be video slot
-          return !s.track;
-        });
-      // Prefer actual video sender
       let sender = entry.pc.getSenders().find(s => s.track && s.track.kind==="video");
-      if(!sender){
-        // if we had only audio, can't add video without renegotiation — rebuild peer
-        continue;
-      }
-      await sender.replaceTrack(track);
-      if(entry.pc.signalingState==="stable"){
-        const offer = await entry.pc.createOffer();
-        await entry.pc.setLocalDescription(offer);
-        sendRaw({
-          t:"signal", id:myId, to:entry._peerId, u:myName, kind:"offer",
-          payload: { type: offer.type, sdp: offer.sdp }
-        });
+      if(sender){
+        await sender.replaceTrack(track);
+        if(entry.pc.signalingState==="stable"){
+          entry.makingOffer = true;
+          const offer = await entry.pc.createOffer();
+          await entry.pc.setLocalDescription(offer);
+          sendRaw({
+            t:"signal", id:myId, to:pid, u:myName, kind:"offer",
+            payload: { type: offer.type, sdp: offer.sdp }
+          });
+          entry.makingOffer = false;
+        }
+      } else if(track){
+        // No video sender yet — full rebuild
+        try{ removePeer(pid); }catch(_){}
+        ensurePeer(pid, entry.name, String(myId)>String(pid));
       }
     }catch(e){ console.warn("setOutboundVideoTrack", e); }
   }
@@ -2024,7 +2051,6 @@ async function handleSignal(data){
   if(!inVoice || !localStream) return;
 
   if(!peers.has(data.id)){
-    // Answerer path — create PC with our tracks, do NOT offer
     ensurePeer(data.id, data.u||data.id, false);
   }
   const entry = peers.get(data.id);
@@ -2046,7 +2072,6 @@ async function handleSignal(data){
       await pc.setRemoteDescription({ type:"offer", sdp: data.payload.sdp });
       await flushIce(entry);
 
-      // sample: createAnswer() then setLocalDescription
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
       sendRaw({
@@ -2054,11 +2079,14 @@ async function handleSignal(data){
         payload: { type: answer.type, sdp: answer.sdp }
       });
       const hasV = /m=video/.test(data.payload.sdp||"");
-      addMessage({type:"system",text:"Answered offer · remote had video:"+hasV});
+      const vPort0 = /m=video 0 /.test(data.payload.sdp||"");
+      addMessage({type:"system",text:"Answered · offer video:"+hasV+(vPort0?" port0":"")});
     } else if(data.kind==="answer" && data.payload && data.payload.sdp){
       if(pc.signalingState !== "have-local-offer") return;
       await pc.setRemoteDescription({ type:"answer", sdp: data.payload.sdp });
       await flushIce(entry);
+      const vPort0 = /m=video 0 /.test(data.payload.sdp||"");
+      if(vPort0) addMessage({type:"system",text:"Remote rejected video (port 0)"});
     } else if(data.kind==="ice" && data.payload){
       const cand = data.payload;
       if(!cand || (cand.candidate==null && cand.candidate!=="")) return;
