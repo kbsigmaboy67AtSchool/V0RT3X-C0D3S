@@ -1427,10 +1427,11 @@ function connect(){
       }
       if(data.t==="voice-join"&&data.id!==myId){
         inVoicePeers.add(data.id);
+        if(data.u) online.set(data.id, Object.assign(online.get(data.id)||{}, {u:data.u, ipId:data.ipId, deviceHash:data.deviceHash}));
         if(inVoice){
-          // Caller with higher id initiates to reduce glare
           const iAmInitiator = String(myId) > String(data.id);
-          ensurePeer(data.id, data.u||"?", iAmInitiator);
+          ensurePeer(data.id, data.u||resolvePeerName(data.id, data.id), iAmInitiator);
+          if(peers.has(data.id) && data.u) peers.get(data.id).name = data.u;
           if(wantVideo||data.video||data.screen){ showVideoStage(true); renderVideoGrid(); }
           addMessage({type:"system",text:"VC peer: "+(data.u||data.id)+(data.video?" · video":"")+(data.screen?" · screen":"")});
         }
@@ -1850,37 +1851,52 @@ function renderVideoGrid(){
   updateVoicePeersUI();
 }
 
+function resolvePeerName(id, fallback){
+  if(fallback && fallback!==id && fallback!=="peer" && fallback!=="?") return fallback;
+  const info = online.get(id);
+  if(info && info.u) return info.u;
+  return fallback || id;
+}
+
 function ensurePeer(id, name, initiator){
   if(id===myId || !inVoice || !localStream) return;
+  name = resolvePeerName(id, name);
   if(peers.has(id)){
-    const st = peers.get(id).pc.connectionState;
-    if(st==="connected" || st==="connecting" || st==="new") return;
+    const ex = peers.get(id);
+    if(name && name!==id) ex.name = name;
+    const st = ex.pc.connectionState;
+    if(st==="connected" || st==="connecting" || st==="new"){
+      renderVideoGrid();
+      return;
+    }
     try{ removePeer(id); }catch(_){}
   }
-  addMessage({type:"system",text:(initiator?"Calling":"Answering")+" "+(name||id)+"…"});
+  addMessage({type:"system",text:(initiator?"Calling":"Answering")+" "+name+"…"});
 
   const pc = new RTCPeerConnection(rtcConfig);
   const polite = String(myId) < String(id);
   const entry = {
-    pc, name: name||id, stream: null, audio: null, hasVideo: false, screen: false,
+    pc, name, stream: null, audio: null, hasVideo: false, screen: false,
     polite, makingOffer: false, ignoreOffer: false, _peerId: id,
     _audioSender: null, _videoSender: null,
     pendingIce: []
   };
   peers.set(id, entry);
+  updateVoicePeersUI();
 
-  // Identical m-line order on every peer
   const audioTx = pc.addTransceiver("audio", { direction: "sendrecv" });
   const videoTx = pc.addTransceiver("video", { direction: "sendrecv" });
   entry._audioSender = audioTx.sender;
   entry._videoSender = videoTx.sender;
 
-  const a = localStream.getAudioTracks().find(tr => tr.readyState==="live") || null;
-  let v = null;
-  if(screenStream) v = screenStream.getVideoTracks().find(tr => tr.readyState==="live") || null;
-  if(!v) v = localStream.getVideoTracks().find(tr => tr.readyState==="live" && tr.enabled) || null;
-  try{ if(a) audioTx.sender.replaceTrack(a); }catch(_){}
-  try{ if(v) videoTx.sender.replaceTrack(v); }catch(_){}
+  async function attachLocalTracks(){
+    const a = localStream.getAudioTracks().find(tr => tr.readyState==="live") || null;
+    let v = null;
+    if(screenStream) v = screenStream.getVideoTracks().find(tr => tr.readyState==="live") || null;
+    if(!v) v = localStream.getVideoTracks().find(tr => tr.readyState==="live") || null;
+    try{ await audioTx.sender.replaceTrack(a); }catch(_){}
+    try{ await videoTx.sender.replaceTrack(v); }catch(_){}
+  }
 
   pc.onicecandidate = (ev)=>{
     if(!ev.candidate) return;
@@ -1897,10 +1913,24 @@ function ensurePeer(id, name, initiator){
 
   pc.ontrack = (ev)=>{
     if(!entry.stream) entry.stream = new MediaStream();
-    if(!entry.stream.getTracks().some(x => x.id===ev.track.id))
-      entry.stream.addTrack(ev.track);
-    if(ev.track.kind==="video") entry.hasVideo = true;
-    if(ev.track.kind==="audio"){
+    // streams from event can have multiple tracks
+    const add = (track)=>{
+      if(!entry.stream.getTracks().some(x => x.id===track.id))
+        entry.stream.addTrack(track);
+      if(track.kind==="video"){
+        entry.hasVideo = true;
+        track.enabled = true;
+        try{
+          const s = track.getSettings && track.getSettings();
+          if(s && s.displaySurface) entry.screen = true;
+        }catch(_){}
+      }
+    };
+    if(ev.track) add(ev.track);
+    if(ev.streams && ev.streams[0]){
+      ev.streams[0].getTracks().forEach(add);
+    }
+    if(ev.track && ev.track.kind==="audio"){
       if(!entry.audio){
         entry.audio = document.createElement("audio");
         entry.audio.autoplay = true;
@@ -1917,26 +1947,47 @@ function ensurePeer(id, name, initiator){
 
   pc.onconnectionstatechange = ()=>{
     const st = pc.connectionState;
-    if(st==="connected") addMessage({type:"system",text:"✓ Linked with "+(name||id)});
+    if(st==="connected"){
+      addMessage({type:"system",text:"✓ Linked with "+entry.name});
+      // If we have local video but peer tile still empty, nudge renegotiation
+      setTimeout(async ()=>{
+        if(!peers.has(id)) return;
+        const hasLocalV = localStream && localStream.getVideoTracks().some(tr=>tr.readyState==="live");
+        if(hasLocalV && entry._videoSender && !entry._videoSender.track){
+          try{
+            const v = localStream.getVideoTracks()[0];
+            await entry._videoSender.replaceTrack(v);
+            if(pc.signalingState==="stable"){
+              entry.makingOffer = true;
+              const offer = await pc.createOffer();
+              await pc.setLocalDescription(offer);
+              sendRaw({t:"signal",id:myId,to:id,u:myName,kind:"offer",payload:sdpPayload(pc.localDescription)});
+              entry.makingOffer = false;
+            }
+          }catch(_){}
+        }
+        renderVideoGrid();
+      }, 500);
+    }
     if(st==="failed"){
-      addMessage({type:"system",text:"✗ Link failed · "+(name||id)});
+      addMessage({type:"system",text:"✗ Link failed · "+entry.name});
       try{ pc.restartIce(); }catch(_){}
     }
     if(st==="closed") removePeer(id);
   };
 
-  // Only create offers in stable state (never during have-remote-offer)
   let negoTimer = null;
-  pc.onnegotiationneeded = ()=>{
+  const doOffer = ()=>{
     if(negoTimer) clearTimeout(negoTimer);
     negoTimer = setTimeout(async ()=>{
       if(!peers.has(id)) return;
       if(entry.makingOffer) return;
-      if(pc.signalingState !== "stable") return; // KEY: skip if have-remote-offer etc
+      if(pc.signalingState !== "stable") return;
       try{
         entry.makingOffer = true;
+        await attachLocalTracks(); // ensure tracks before offer
         const offer = await pc.createOffer();
-        if(pc.signalingState !== "stable") return; // re-check after await
+        if(pc.signalingState !== "stable") return;
         await pc.setLocalDescription(offer);
         sendRaw({
           t:"signal", id:myId, to:id, u:myName, kind:"offer",
@@ -1944,12 +1995,14 @@ function ensurePeer(id, name, initiator){
         });
       }catch(e){ console.warn("nego", e); }
       finally{ entry.makingOffer = false; }
-    }, 100);
+    }, 120);
   };
+  pc.onnegotiationneeded = ()=>{ doOffer(); };
 
-  if(initiator){
-    setTimeout(()=>{ try{ pc.onnegotiationneeded(); }catch(_){} }, 100);
-  }
+  // Attach tracks first, then initiator offers
+  attachLocalTracks().then(()=>{
+    if(initiator) doOffer();
+  });
 }
 
 async function flushIce(entry){
@@ -1970,6 +2023,7 @@ async function handleSignal(data){
   }
   const entry = peers.get(data.id);
   if(!entry) return;
+  if(data.u) entry.name = data.u;
   const pc = entry.pc;
 
   try{
@@ -1981,12 +2035,16 @@ async function handleSignal(data){
       if(offerCollision && entry.polite && pc.signalingState === "have-local-offer"){
         try{ await pc.setLocalDescription({ type: "rollback" }); }catch(_){}
       }
+      if(pc.signalingState === "have-remote-offer") return;
 
-      // Don't set remote offer if we already have one processed mid-flight
-      if(pc.signalingState === "have-remote-offer"){
-        // already processing an offer — skip duplicate
-        return;
-      }
+      // Make sure our send tracks are on before answering
+      try{
+        const a = localStream.getAudioTracks().find(tr => tr.readyState==="live");
+        let v = screenStream && screenStream.getVideoTracks()[0];
+        if(!v) v = localStream.getVideoTracks().find(tr => tr.readyState==="live");
+        if(entry._audioSender && a) await entry._audioSender.replaceTrack(a);
+        if(entry._videoSender) await entry._videoSender.replaceTrack(v||null);
+      }catch(_){}
 
       await pc.setRemoteDescription({ type: "offer", sdp: data.payload.sdp });
       await flushIce(entry);
@@ -2002,8 +2060,7 @@ async function handleSignal(data){
       await flushIce(entry);
     } else if(data.kind==="ice" && data.payload){
       const cand = data.payload;
-      if(!cand || (!cand.candidate && cand.candidate!=="")) return;
-      // Queue until remote description exists
+      if(!cand || (cand.candidate==null && cand.candidate!=="")) return;
       if(!pc.remoteDescription){
         entry.pendingIce.push(cand);
         return;
@@ -2013,7 +2070,6 @@ async function handleSignal(data){
     }
   }catch(e){
     console.warn("signal", e);
-    // Don't spam chat with every ice race
     if(e && e.name && e.name!=="InvalidStateError")
       addMessage({type:"system",text:"Signal: "+e.name});
   }
