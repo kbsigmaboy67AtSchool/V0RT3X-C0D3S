@@ -1723,14 +1723,7 @@ function toggleCam(){
   }
 }
 
-async function setOutboundVideoTrack(track){
-  for(const[,entry] of peers){
-    try{
-      const sender = entry._videoSender;
-      if(sender) await sender.replaceTrack(track);
-    }catch(e){ console.warn("replace video", e); }
-  }
-}
+
 
 async function setOutboundAudioTrack(track){
   for(const[,entry] of peers){
@@ -1858,6 +1851,12 @@ function resolvePeerName(id, fallback){
   return fallback || id;
 }
 
+/**
+ * Video path matches webrtc/samples pc1:
+ *   localStream.getTracks().forEach(t => pc.addTrack(t, localStream))
+ *   remote: video.srcObject = event.streams[0]
+ * Audio already worked; this is the proven way to send video with it.
+ */
 function ensurePeer(id, name, initiator){
   if(id===myId || !inVoice || !localStream) return;
   name = resolvePeerName(id, name);
@@ -1878,24 +1877,35 @@ function ensurePeer(id, name, initiator){
   const entry = {
     pc, name, stream: null, audio: null, hasVideo: false, screen: false,
     polite, makingOffer: false, ignoreOffer: false, _peerId: id,
-    _audioSender: null, _videoSender: null,
     pendingIce: []
   };
   peers.set(id, entry);
   updateVoicePeersUI();
 
-  const audioTx = pc.addTransceiver("audio", { direction: "sendrecv" });
-  const videoTx = pc.addTransceiver("video", { direction: "sendrecv" });
-  entry._audioSender = audioTx.sender;
-  entry._videoSender = videoTx.sender;
+  // Stream to send: screen replaces camera video track in a clone-like composite
+  function outboundStream(){
+    const ms = new MediaStream();
+    localStream.getAudioTracks().forEach(tr=>{ if(tr.readyState==="live") ms.addTrack(tr); });
+    if(screenStream){
+      screenStream.getVideoTracks().forEach(tr=>{ if(tr.readyState==="live") ms.addTrack(tr); });
+      screenStream.getAudioTracks().forEach(tr=>{ if(tr.readyState==="live") ms.addTrack(tr); });
+    } else {
+      localStream.getVideoTracks().forEach(tr=>{ if(tr.readyState==="live") ms.addTrack(tr); });
+    }
+    return ms;
+  }
 
-  async function attachLocalTracks(){
-    const a = localStream.getAudioTracks().find(tr => tr.readyState==="live") || null;
-    let v = null;
-    if(screenStream) v = screenStream.getVideoTracks().find(tr => tr.readyState==="live") || null;
-    if(!v) v = localStream.getVideoTracks().find(tr => tr.readyState==="live") || null;
-    try{ await audioTx.sender.replaceTrack(a); }catch(_){}
-    try{ await videoTx.sender.replaceTrack(v); }catch(_){}
+  // Official pattern: addTrack each track with the SAME stream object
+  const sendStream = outboundStream();
+  sendStream.getTracks().forEach(tr=>{
+    try{ pc.addTrack(tr, sendStream); }catch(e){ console.warn("addTrack", e); }
+  });
+  // If no video track yet, still want to receive video
+  if(!sendStream.getVideoTracks().length){
+    try{ pc.addTransceiver("video", { direction: "recvonly" }); }catch(_){}
+  }
+  if(!sendStream.getAudioTracks().length){
+    try{ pc.addTransceiver("audio", { direction: "recvonly" }); }catch(_){}
   }
 
   pc.onicecandidate = (ev)=>{
@@ -1911,26 +1921,20 @@ function ensurePeer(id, name, initiator){
     });
   };
 
+  // KEY: use event.streams[0] like the official sample
   pc.ontrack = (ev)=>{
-    if(!entry.stream) entry.stream = new MediaStream();
-    // streams from event can have multiple tracks
-    const add = (track)=>{
-      if(!entry.stream.getTracks().some(x => x.id===track.id))
-        entry.stream.addTrack(track);
-      if(track.kind==="video"){
-        entry.hasVideo = true;
-        track.enabled = true;
-        try{
-          const s = track.getSettings && track.getSettings();
-          if(s && s.displaySurface) entry.screen = true;
-        }catch(_){}
-      }
-    };
-    if(ev.track) add(ev.track);
-    if(ev.streams && ev.streams[0]){
-      ev.streams[0].getTracks().forEach(add);
+    const remote = (ev.streams && ev.streams[0]) ? ev.streams[0] : null;
+    if(remote){
+      entry.stream = remote;
+    } else {
+      if(!entry.stream) entry.stream = new MediaStream();
+      if(ev.track && !entry.stream.getTracks().some(x=>x.id===ev.track.id))
+        entry.stream.addTrack(ev.track);
     }
-    if(ev.track && ev.track.kind==="audio"){
+    if(ev.track && ev.track.kind==="video") entry.hasVideo = true;
+    if(entry.stream && entry.stream.getVideoTracks().length) entry.hasVideo = true;
+
+    if(entry.stream.getAudioTracks().length){
       if(!entry.audio){
         entry.audio = document.createElement("audio");
         entry.audio.autoplay = true;
@@ -1947,28 +1951,7 @@ function ensurePeer(id, name, initiator){
 
   pc.onconnectionstatechange = ()=>{
     const st = pc.connectionState;
-    if(st==="connected"){
-      addMessage({type:"system",text:"✓ Linked with "+entry.name});
-      // If we have local video but peer tile still empty, nudge renegotiation
-      setTimeout(async ()=>{
-        if(!peers.has(id)) return;
-        const hasLocalV = localStream && localStream.getVideoTracks().some(tr=>tr.readyState==="live");
-        if(hasLocalV && entry._videoSender && !entry._videoSender.track){
-          try{
-            const v = localStream.getVideoTracks()[0];
-            await entry._videoSender.replaceTrack(v);
-            if(pc.signalingState==="stable"){
-              entry.makingOffer = true;
-              const offer = await pc.createOffer();
-              await pc.setLocalDescription(offer);
-              sendRaw({t:"signal",id:myId,to:id,u:myName,kind:"offer",payload:sdpPayload(pc.localDescription)});
-              entry.makingOffer = false;
-            }
-          }catch(_){}
-        }
-        renderVideoGrid();
-      }, 500);
-    }
+    if(st==="connected") addMessage({type:"system",text:"✓ Linked with "+entry.name});
     if(st==="failed"){
       addMessage({type:"system",text:"✗ Link failed · "+entry.name});
       try{ pc.restartIce(); }catch(_){}
@@ -1977,16 +1960,14 @@ function ensurePeer(id, name, initiator){
   };
 
   let negoTimer = null;
-  const doOffer = ()=>{
+  pc.onnegotiationneeded = ()=>{
     if(negoTimer) clearTimeout(negoTimer);
     negoTimer = setTimeout(async ()=>{
-      if(!peers.has(id)) return;
-      if(entry.makingOffer) return;
+      if(!peers.has(id) || entry.makingOffer) return;
       if(pc.signalingState !== "stable") return;
       try{
         entry.makingOffer = true;
-        await attachLocalTracks(); // ensure tracks before offer
-        const offer = await pc.createOffer();
+        const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
         if(pc.signalingState !== "stable") return;
         await pc.setLocalDescription(offer);
         sendRaw({
@@ -1995,14 +1976,40 @@ function ensurePeer(id, name, initiator){
         });
       }catch(e){ console.warn("nego", e); }
       finally{ entry.makingOffer = false; }
-    }, 120);
+    }, 80);
   };
-  pc.onnegotiationneeded = ()=>{ doOffer(); };
 
-  // Attach tracks first, then initiator offers
-  attachLocalTracks().then(()=>{
-    if(initiator) doOffer();
-  });
+  if(initiator){
+    setTimeout(()=>{ try{ pc.onnegotiationneeded(); }catch(_){} }, 60);
+  }
+}
+
+async function setOutboundVideoTrack(track){
+  // For screen share / cam switch: replaceTrack on existing video sender (keeps m-lines)
+  for(const[,entry] of peers){
+    try{
+      const sender = entry.pc.getSenders().find(s => s.track && s.track.kind==="video")
+        || entry.pc.getSenders().find(s => !s.track && s.track===null);
+      // Prefer sender that was for video
+      let vs = entry.pc.getSenders().find(s => (s.track && s.track.kind==="video"));
+      if(!vs){
+        // find by transceiver
+        for(const tr of entry.pc.getTransceivers()){
+          if(tr.receiver.track && tr.receiver.track.kind==="video"){ vs = tr.sender; break; }
+          if(tr.sender.track && tr.sender.track.kind==="video"){ vs = tr.sender; break; }
+        }
+      }
+      if(!vs){
+        for(const tr of entry.pc.getTransceivers()){
+          if(tr.mid !== null && (!tr.sender.track || tr.sender.track.kind!=="audio")){
+            // second transceiver is usually video
+          }
+        }
+        vs = entry.pc.getSenders().filter(s => !s.track || s.track.kind!=="audio").pop();
+      }
+      if(vs) await vs.replaceTrack(track);
+    }catch(e){ console.warn("setOutboundVideoTrack", e); }
+  }
 }
 
 async function flushIce(entry){
@@ -2031,20 +2038,10 @@ async function handleSignal(data){
       const offerCollision = entry.makingOffer || pc.signalingState !== "stable";
       entry.ignoreOffer = !entry.polite && offerCollision;
       if(entry.ignoreOffer) return;
-
       if(offerCollision && entry.polite && pc.signalingState === "have-local-offer"){
         try{ await pc.setLocalDescription({ type: "rollback" }); }catch(_){}
       }
       if(pc.signalingState === "have-remote-offer") return;
-
-      // Make sure our send tracks are on before answering
-      try{
-        const a = localStream.getAudioTracks().find(tr => tr.readyState==="live");
-        let v = screenStream && screenStream.getVideoTracks()[0];
-        if(!v) v = localStream.getVideoTracks().find(tr => tr.readyState==="live");
-        if(entry._audioSender && a) await entry._audioSender.replaceTrack(a);
-        if(entry._videoSender) await entry._videoSender.replaceTrack(v||null);
-      }catch(_){}
 
       await pc.setRemoteDescription({ type: "offer", sdp: data.payload.sdp });
       await flushIce(entry);
