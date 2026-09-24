@@ -390,6 +390,7 @@
     <button class="btn" id="loginBtn" style="width:100%">Enter room</button>
     <button class="btn btn-danger" id="loginCancel" style="width:100%">Cancel</button>
   </div></div>
+<script src="https://webrtc.github.io/adapter/adapter-latest.js"></script>
 <script>
 function uuid(){if(crypto.randomUUID)try{return crypto.randomUUID();}catch(_){}
   const b=new Uint8Array(16);(crypto.getRandomValues||function(a){for(let i=0;i<a.length;i++)a[i]=Math.random()*256|0;})(b);
@@ -1804,7 +1805,8 @@ function renderVideoGrid(){
     });
   }
   for(const[id,p] of peers){
-    const hasV=p.stream && p.stream.getVideoTracks().some(tr=>tr.readyState!=="ended");
+    const vTracks=(p.stream&&p.stream.getVideoTracks())||[];
+    const hasV=vTracks.some(tr=>tr.readyState!=="ended" && tr.enabled!==false);
     tiles.push({
       id, name:p.name||id, stream:p.stream, mirror:false,
       camOff:!hasV, muted:false, self:false, screen:!!p.screen, pipStream:null
@@ -1851,25 +1853,25 @@ function resolvePeerName(id, fallback){
   return fallback || id;
 }
 
-/**
- * Video path matches webrtc/samples pc1:
- *   localStream.getTracks().forEach(t => pc.addTrack(t, localStream))
- *   remote: video.srcObject = event.streams[0]
- * Audio already worked; this is the proven way to send video with it.
- */
+/** Closest to webrtc/samples pc1 — sequential offer/answer, addTrack only, no transceiver games. */
 function ensurePeer(id, name, initiator){
   if(id===myId || !inVoice || !localStream) return;
   name = resolvePeerName(id, name);
+
+  // Always rebuild peer when (re)joining video so we never keep an audio-only PC
   if(peers.has(id)){
     const ex = peers.get(id);
-    if(name && name!==id) ex.name = name;
     const st = ex.pc.connectionState;
-    if(st==="connected" || st==="connecting" || st==="new"){
+    const localHasVideo = localStream.getVideoTracks().some(tr=>tr.readyState==="live");
+    const sendersHaveVideo = ex.pc.getSenders().some(s=>s.track && s.track.kind==="video");
+    if(st==="connected" && (!localHasVideo || sendersHaveVideo)){
+      if(name) ex.name = name;
       renderVideoGrid();
       return;
     }
     try{ removePeer(id); }catch(_){}
   }
+
   addMessage({type:"system",text:(initiator?"Calling":"Answering")+" "+name+"…"});
 
   const pc = new RTCPeerConnection(rtcConfig);
@@ -1882,33 +1884,22 @@ function ensurePeer(id, name, initiator){
   peers.set(id, entry);
   updateVoicePeersUI();
 
-  // Stream to send: screen replaces camera video track in a clone-like composite
-  function outboundStream(){
-    const ms = new MediaStream();
-    localStream.getAudioTracks().forEach(tr=>{ if(tr.readyState==="live") ms.addTrack(tr); });
-    if(screenStream){
-      screenStream.getVideoTracks().forEach(tr=>{ if(tr.readyState==="live") ms.addTrack(tr); });
-      screenStream.getAudioTracks().forEach(tr=>{ if(tr.readyState==="live") ms.addTrack(tr); });
-    } else {
-      localStream.getVideoTracks().forEach(tr=>{ if(tr.readyState==="live") ms.addTrack(tr); });
-    }
-    return ms;
+  // === official sample pattern ===
+  // Add every live local track (audio + video) with ONE MediaStream
+  const tracks = [];
+  localStream.getAudioTracks().forEach(tr=>{ if(tr.readyState==="live") tracks.push(tr); });
+  if(screenStream){
+    screenStream.getTracks().forEach(tr=>{ if(tr.readyState==="live") tracks.push(tr); });
+  } else {
+    localStream.getVideoTracks().forEach(tr=>{ if(tr.readyState==="live") tracks.push(tr); });
   }
-
-  // Official pattern: addTrack each track with the SAME stream object
-  const sendStream = outboundStream();
-  sendStream.getTracks().forEach(tr=>{
-    try{ pc.addTrack(tr, sendStream); }catch(e){ console.warn("addTrack", e); }
+  const sendStream = new MediaStream(tracks);
+  tracks.forEach(tr=>{
+    try{ pc.addTrack(tr, sendStream); }catch(e){ console.warn(e); }
   });
-  // If no video track yet, still want to receive video
-  if(!sendStream.getVideoTracks().length){
-    try{ pc.addTransceiver("video", { direction: "recvonly" }); }catch(_){}
-  }
-  if(!sendStream.getAudioTracks().length){
-    try{ pc.addTransceiver("audio", { direction: "recvonly" }); }catch(_){}
-  }
 
   pc.onicecandidate = (ev)=>{
+    // sample also sends null candidate as end-of-candidates sometimes; we only send real ones
     if(!ev.candidate) return;
     sendRaw({
       t:"signal", id:myId, to:id, u:myName, kind:"ice",
@@ -1921,28 +1912,28 @@ function ensurePeer(id, name, initiator){
     });
   };
 
-  // KEY: use event.streams[0] like the official sample
   pc.ontrack = (ev)=>{
-    const remote = (ev.streams && ev.streams[0]) ? ev.streams[0] : null;
-    if(remote){
-      entry.stream = remote;
-    } else {
+    // sample: remoteVideo.srcObject = e.streams[0]
+    if(ev.streams && ev.streams[0]){
+      entry.stream = ev.streams[0];
+    } else if(ev.track){
       if(!entry.stream) entry.stream = new MediaStream();
-      if(ev.track && !entry.stream.getTracks().some(x=>x.id===ev.track.id))
+      if(!entry.stream.getTracks().some(x=>x.id===ev.track.id))
         entry.stream.addTrack(ev.track);
     }
-    if(ev.track && ev.track.kind==="video") entry.hasVideo = true;
-    if(entry.stream && entry.stream.getVideoTracks().length) entry.hasVideo = true;
+    entry.hasVideo = !!(entry.stream && entry.stream.getVideoTracks().some(tr=>tr.readyState!=="ended"));
 
-    if(entry.stream.getAudioTracks().length){
+    if(entry.stream && entry.stream.getAudioTracks().length){
       if(!entry.audio){
         entry.audio = document.createElement("audio");
         entry.audio.autoplay = true;
         entry.audio.playsInline = true;
         document.body.appendChild(entry.audio);
       }
-      entry.audio.srcObject = entry.stream;
-      entry.audio.play().catch(()=>{});
+      if(entry.audio.srcObject !== entry.stream){
+        entry.audio.srcObject = entry.stream;
+        entry.audio.play().catch(()=>{});
+      }
       startRemoteVolume(entry);
     }
     showVideoStage(true);
@@ -1951,7 +1942,11 @@ function ensurePeer(id, name, initiator){
 
   pc.onconnectionstatechange = ()=>{
     const st = pc.connectionState;
-    if(st==="connected") addMessage({type:"system",text:"✓ Linked with "+entry.name});
+    if(st==="connected"){
+      const vt = entry.stream ? entry.stream.getVideoTracks().length : 0;
+      const at = entry.stream ? entry.stream.getAudioTracks().length : 0;
+      addMessage({type:"system",text:"✓ Linked "+entry.name+" · recv a:"+at+" v:"+vt});
+    }
     if(st==="failed"){
       addMessage({type:"system",text:"✗ Link failed · "+entry.name});
       try{ pc.restartIce(); }catch(_){}
@@ -1959,55 +1954,58 @@ function ensurePeer(id, name, initiator){
     if(st==="closed") removePeer(id);
   };
 
-  let negoTimer = null;
-  pc.onnegotiationneeded = ()=>{
-    if(negoTimer) clearTimeout(negoTimer);
-    negoTimer = setTimeout(async ()=>{
-      if(!peers.has(id) || entry.makingOffer) return;
-      if(pc.signalingState !== "stable") return;
+  // NO onnegotiationneeded auto-loop — only explicit offer (like the sample's Call button)
+  if(initiator){
+    (async ()=>{
       try{
         entry.makingOffer = true;
-        const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
-        if(pc.signalingState !== "stable") return;
+        // sample: createOffer({ offerToReceiveAudio:1, offerToReceiveVideo:1 })
+        const offer = await pc.createOffer({
+          offerToReceiveAudio: true,
+          offerToReceiveVideo: true
+        });
         await pc.setLocalDescription(offer);
         sendRaw({
           t:"signal", id:myId, to:id, u:myName, kind:"offer",
-          payload: sdpPayload(pc.localDescription)
+          payload: { type: offer.type, sdp: offer.sdp }
         });
-      }catch(e){ console.warn("nego", e); }
-      finally{ entry.makingOffer = false; }
-    }, 80);
-  };
-
-  if(initiator){
-    setTimeout(()=>{ try{ pc.onnegotiationneeded(); }catch(_){} }, 60);
+        // Debug: does offer contain video?
+        const hasV = /m=video/.test(offer.sdp||"");
+        const hasA = /m=audio/.test(offer.sdp||"");
+        addMessage({type:"system",text:"Offer sent · a:"+hasA+" v:"+hasV});
+      }catch(e){
+        console.warn("offer", e);
+        addMessage({type:"system",text:"Offer failed: "+(e.message||e.name)});
+      }finally{
+        entry.makingOffer = false;
+      }
+    })();
   }
 }
 
 async function setOutboundVideoTrack(track){
-  // For screen share / cam switch: replaceTrack on existing video sender (keeps m-lines)
   for(const[,entry] of peers){
     try{
-      const sender = entry.pc.getSenders().find(s => s.track && s.track.kind==="video")
-        || entry.pc.getSenders().find(s => !s.track && s.track===null);
-      // Prefer sender that was for video
-      let vs = entry.pc.getSenders().find(s => (s.track && s.track.kind==="video"));
-      if(!vs){
-        // find by transceiver
-        for(const tr of entry.pc.getTransceivers()){
-          if(tr.receiver.track && tr.receiver.track.kind==="video"){ vs = tr.sender; break; }
-          if(tr.sender.track && tr.sender.track.kind==="video"){ vs = tr.sender; break; }
-        }
+      const vs = entry.pc.getSenders().find(s => s.track && s.track.kind==="video")
+        || entry.pc.getSenders().find(s => {
+          // sender with no track that might be video slot
+          return !s.track;
+        });
+      // Prefer actual video sender
+      let sender = entry.pc.getSenders().find(s => s.track && s.track.kind==="video");
+      if(!sender){
+        // if we had only audio, can't add video without renegotiation — rebuild peer
+        continue;
       }
-      if(!vs){
-        for(const tr of entry.pc.getTransceivers()){
-          if(tr.mid !== null && (!tr.sender.track || tr.sender.track.kind!=="audio")){
-            // second transceiver is usually video
-          }
-        }
-        vs = entry.pc.getSenders().filter(s => !s.track || s.track.kind!=="audio").pop();
+      await sender.replaceTrack(track);
+      if(entry.pc.signalingState==="stable"){
+        const offer = await entry.pc.createOffer();
+        await entry.pc.setLocalDescription(offer);
+        sendRaw({
+          t:"signal", id:myId, to:entry._peerId, u:myName, kind:"offer",
+          payload: { type: offer.type, sdp: offer.sdp }
+        });
       }
-      if(vs) await vs.replaceTrack(track);
     }catch(e){ console.warn("setOutboundVideoTrack", e); }
   }
 }
@@ -2026,6 +2024,7 @@ async function handleSignal(data){
   if(!inVoice || !localStream) return;
 
   if(!peers.has(data.id)){
+    // Answerer path — create PC with our tracks, do NOT offer
     ensurePeer(data.id, data.u||data.id, false);
   }
   const entry = peers.get(data.id);
@@ -2038,22 +2037,27 @@ async function handleSignal(data){
       const offerCollision = entry.makingOffer || pc.signalingState !== "stable";
       entry.ignoreOffer = !entry.polite && offerCollision;
       if(entry.ignoreOffer) return;
-      if(offerCollision && entry.polite && pc.signalingState === "have-local-offer"){
-        try{ await pc.setLocalDescription({ type: "rollback" }); }catch(_){}
-      }
-      if(pc.signalingState === "have-remote-offer") return;
 
-      await pc.setRemoteDescription({ type: "offer", sdp: data.payload.sdp });
+      if(offerCollision && entry.polite && pc.signalingState==="have-local-offer"){
+        try{ await pc.setLocalDescription({ type:"rollback" }); }catch(_){}
+      }
+      if(pc.signalingState==="have-remote-offer") return;
+
+      await pc.setRemoteDescription({ type:"offer", sdp: data.payload.sdp });
       await flushIce(entry);
+
+      // sample: createAnswer() then setLocalDescription
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
       sendRaw({
         t:"signal", id:myId, to:data.id, u:myName, kind:"answer",
-        payload: sdpPayload(pc.localDescription)
+        payload: { type: answer.type, sdp: answer.sdp }
       });
+      const hasV = /m=video/.test(data.payload.sdp||"");
+      addMessage({type:"system",text:"Answered offer · remote had video:"+hasV});
     } else if(data.kind==="answer" && data.payload && data.payload.sdp){
       if(pc.signalingState !== "have-local-offer") return;
-      await pc.setRemoteDescription({ type: "answer", sdp: data.payload.sdp });
+      await pc.setRemoteDescription({ type:"answer", sdp: data.payload.sdp });
       await flushIce(entry);
     } else if(data.kind==="ice" && data.payload){
       const cand = data.payload;
@@ -2068,7 +2072,7 @@ async function handleSignal(data){
   }catch(e){
     console.warn("signal", e);
     if(e && e.name && e.name!=="InvalidStateError")
-      addMessage({type:"system",text:"Signal: "+e.name});
+      addMessage({type:"system",text:"Signal: "+e.name+" "+String(e.message||"").slice(0,60)});
   }
 }
 
