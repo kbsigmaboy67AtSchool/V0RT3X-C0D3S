@@ -65,67 +65,143 @@
     .voice-bar{display:flex;flex-wrap:wrap;gap:8px;padding:10px;background:var(--surface2);border:2px solid #333;border-radius:var(--radius)}
     .voice-bar.on{border-color:var(--voice)}
 
-    /* Docked meeting: video on top, chat usable below */
-    #videoStage{display:none;position:relative;z-index:5;background:#0b0b0b;flex-direction:column;font-family:var(--font);border-bottom:2px solid #333;max-height:48vh;min-height:0;flex-shrink:0}
+    /* Meeting stage: docked or full-tab */
+    #videoStage{display:none;position:relative;z-index:5;background:#0b0b0b;flex-direction:column;font-family:var(--font);border-bottom:2px solid #333;max-height:48vh;min-height:180px;flex-shrink:0}
     #videoStage.on{display:flex}
     body.in-call main{flex:1;min-height:0}
-    body.in-call .chat{min-height:0}
+    body.in-call .chat{min-height:0;display:flex;flex-direction:column}
     body.in-call #videoStage{max-height:46vh}
-    #videoStage.expanded{position:fixed;inset:0;z-index:80;max-height:none}
-    .vtile .vtools{position:absolute;top:8px;left:8px;display:flex;gap:4px;z-index:6;opacity:0;transition:opacity .15s}
-    .vtile:hover .vtools{opacity:1}
-    .vtile .vtools button{width:28px;height:28px;border-radius:8px;border:1px solid #555;background:rgba(0,0,0,.65);color:#fff;cursor:pointer;font-size:12px;padding:0}
-    .vtile .vcaption{position:absolute;left:8px;right:8px;bottom:32px;z-index:5;background:rgba(0,0,0,.7);color:#fff;font-size:.75rem;padding:4px 8px;border-radius:8px;text-align:center;pointer-events:none;display:none}
-    .vtile .vcaption.on{display:block}
-    .vtile video.crop-top{object-position:center top}
-    .vtile video.crop-bottom{object-position:center bottom}
-    .vtile video.crop-left{object-position:left center}
-    .vtile video.crop-right{object-position:right center}
-    .msg .reply-quote{border-left:3px solid #5b8def;background:rgba(91,141,239,.1);padding:6px 10px;margin-bottom:6px;border-radius:0 8px 8px 0;font-size:.8rem;color:#b8d0ff;cursor:pointer}
-    .msg .reply-quote .rq-user{font-weight:600;color:#fff;font-size:.72rem}
-    .msg .reacts{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
-    .msg .react-pill{font-size:.75rem;padding:2px 8px;border-radius:999px;background:#1a1a1a;border:1px solid #333;cursor:pointer;user-select:none}
-    .msg .react-pill:hover,.msg .react-pill.mine{border-color:#5b8def;background:rgba(91,141,239,.15)}
-    #replyBar{display:none;width:100%;order:-1;padding:6px 10px;background:#151515;border:1px solid #333;border-radius:10px;font-size:.78rem;align-items:center;gap:8px}
-    #replyBar.on{display:flex}
-    #replyBar .rb-text{flex:1;color:#aaa;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    #replyBar button{border:none;background:transparent;color:#fff;cursor:pointer;font-size:1rem}
+    /* Fullscreen entire tab — chat hidden */
+    body.meeting-fs #videoStage{
+      position:fixed;inset:0;z-index:90;max-height:none;border:none;display:flex !important;
+    }
+    body.meeting-fs > header,
+    body.meeting-fs > .tabbar,
+    body.meeting-fs > main > .panel{display:none !important}
+    body.meeting-fs > main{display:block;height:100vh;position:relative}
+    /* chat column still wraps stage; hide messages/compose until sidebar */
+    body.meeting-fs > main > .chat{
+      display:block !important;position:static;border:none;background:transparent;
+      height:100%;width:100%;overflow:visible;
+    }
+    body.meeting-fs > main > .chat > .messages,
+    body.meeting-fs > main > .chat > .compose,
+    body.meeting-fs > main > .chat > #replyBar{
+      display:none !important;
+    }
+    body.meeting-fs.chat-side-right > main > .chat > .messages,
+    body.meeting-fs.chat-side-right > main > .chat > .compose,
+    body.meeting-fs.chat-side-left > main > .chat > .messages,
+    body.meeting-fs.chat-side-left > main > .chat > .compose,
+    body.meeting-fs.chat-side-bottom > main > .chat > .messages,
+    body.meeting-fs.chat-side-bottom > main > .chat > .compose{
+      display:flex !important;
+    }
+    body.meeting-fs.chat-side-right > main > .chat > .messages,
+    body.meeting-fs.chat-side-left > main > .chat > .messages{
+      position:fixed;z-index:96;top:0;bottom:52px;width:min(340px,38vw);
+      background:#0d0d0d;border:2px solid #fff;flex-direction:column;overflow-y:auto;
+    }
+    body.meeting-fs.chat-side-right > main > .chat > .messages{right:0;border-right:none}
+    body.meeting-fs.chat-side-left > main > .chat > .messages{left:0;border-left:none}
+    body.meeting-fs.chat-side-right > main > .chat > .compose,
+    body.meeting-fs.chat-side-left > main > .chat > .compose{
+      position:fixed;z-index:96;bottom:0;width:min(340px,38vw);display:flex !important;
+      background:#0d0d0d;border:2px solid #fff;border-top:1px solid #333;
+    }
+    body.meeting-fs.chat-side-right > main > .chat > .compose{right:0;border-right:none}
+    body.meeting-fs.chat-side-left > main > .chat > .compose{left:0;border-left:none}
+    body.meeting-fs.chat-side-bottom > main > .chat > .messages{
+      position:fixed;z-index:96;left:0;right:0;bottom:52px;height:min(220px,30vh);
+      background:#0d0d0d;border:2px solid #fff;border-bottom:none;overflow-y:auto;display:flex !important;flex-direction:column;
+    }
+    body.meeting-fs.chat-side-bottom > main > .chat > .compose{
+      position:fixed;z-index:96;left:0;right:0;bottom:0;display:flex !important;
+      background:#0d0d0d;border:2px solid #fff;border-top:1px solid #333;
+    }
+    body.meeting-fs.chat-side-right #videoStage{right:min(340px,38vw)}
+    body.meeting-fs.chat-side-left #videoStage{left:min(340px,38vw)}
+    body.meeting-fs.chat-side-bottom #videoStage{bottom:min(272px,30vh + 52px)}
 
+    #videoStage .stage-top{flex-shrink:0;display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-bottom:1px solid #222;background:#111;gap:8px;flex-wrap:wrap}
+    #videoStage .stage-top .title{font-weight:700;letter-spacing:.06em;font-size:.9rem}
+    #videoStage .stage-top .meta{font-size:.75rem;color:#888}
 
-    .vtile.screen-share{position:relative}
+    /* Freeform tile canvas */
+    #videoGrid{
+      flex:1;position:relative;min-height:120px;overflow:hidden;background:#0a0a0a;
+    }
+    .vtile{
+      position:absolute;background:#1a1a1a;border-radius:12px;overflow:hidden;
+      border:2px solid #2a2a2a;min-width:100px;min-height:72px;
+      box-shadow:0 4px 18px rgba(0,0,0,.4);touch-action:none;user-select:none;
+    }
+    .vtile.talking{border-color:#5b8def;box-shadow:0 0 16px rgba(91,141,239,.45)}
+    .vtile.audio-only{min-width:120px;min-height:88px;aspect-ratio:auto}
+    .vtile video{width:100%;height:100%;object-fit:cover;background:#000;display:block;position:relative;z-index:2;pointer-events:none}
+    .vtile video.mirror{transform:scaleX(-1)}
+    .vtile video.screen-main{object-fit:contain}
+
     .vtile .pip-cam{
-      position:absolute;top:10px;right:10px;width:22%;max-width:180px;min-width:96px;
+      position:absolute;top:10px;right:10px;width:22%;max-width:160px;min-width:72px;
       aspect-ratio:16/10;border-radius:10px;overflow:hidden;border:2px solid #fff;
-      box-shadow:0 4px 18px rgba(0,0,0,.55);z-index:5;background:#111;
+      box-shadow:0 4px 18px rgba(0,0,0,.55);z-index:5;background:#111;pointer-events:none
     }
     .vtile .pip-cam video{width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
     .vtile .pip-cam .pip-label{
       position:absolute;left:6px;bottom:4px;font-size:0.65rem;color:#fff;
-      text-shadow:0 1px 3px #000;pointer-events:none
+      text-shadow:0 1px 3px #000
     }
-    .vtile video.screen-main{object-fit:contain;background:#000}
-
-    #videoStage .stage-top{flex-shrink:0;display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-bottom:1px solid #222;background:#111}
-    #videoStage .stage-top .title{font-weight:700;letter-spacing:.06em;font-size:.95rem}
-    #videoStage .stage-top .meta{font-size:.75rem;color:#888}
-    #videoGrid{flex:1;display:grid;gap:10px;padding:12px;min-height:0;overflow:auto;align-content:center;justify-content:center;grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
-    #videoGrid.count-1{grid-template-columns:1fr;max-width:960px;margin:0 auto;width:100%}
-    #videoGrid.count-2{grid-template-columns:1fr 1fr}
-    #videoGrid.count-3,#videoGrid.count-4{grid-template-columns:1fr 1fr}
-    .vtile{position:relative;background:#1a1a1a;border-radius:12px;overflow:hidden;border:2px solid #2a2a2a;aspect-ratio:16/10;min-height:140px}
-    .vtile.talking{border-color:#5b8def;box-shadow:0 0 16px rgba(91,141,239,.45)}
-    .vtile video{width:100%;height:100%;object-fit:cover;background:#000;display:block;position:relative;z-index:2}
-    .vtile video.mirror{transform:scaleX(-1)}
-    .vtile .vname{position:absolute;left:8px;bottom:8px;padding:3px 10px;border-radius:6px;background:rgba(0,0,0,.65);font-size:.78rem;max-width:80%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    .vtile .vbadges{position:absolute;top:8px;right:8px;display:flex;gap:4px}
-    .vtile .vbadge{width:28px;height:28px;border-radius:50%;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;font-size:14px}
-    .vtile .avatar-fallback{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:2.5rem;font-weight:700;color:#555;background:#161616}
+    .vtile .vname{position:absolute;left:8px;bottom:8px;padding:3px 10px;border-radius:6px;background:rgba(0,0,0,.65);font-size:.78rem;max-width:70%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;z-index:5;pointer-events:none}
+    .vtile .avatar-fallback{position:absolute;inset:0;display:none;align-items:center;justify-content:center;font-size:2rem;font-weight:700;color:#555;background:#161616;z-index:1}
+    .vtile.cam-off .avatar-fallback{display:flex}
     .vtile.cam-off video{opacity:0}
-    #videoControls{flex-shrink:0;display:flex;align-items:center;justify-content:center;gap:10px;padding:14px 16px 18px;background:#0a0a0a;border-top:1px solid #222}
-    #videoControls .vc-btn{width:48px;height:48px;border-radius:50%;border:2px solid #444;background:#1a1a1a;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:20px}
+    .vtile .wave-wrap{position:absolute;inset:0;display:none;align-items:center;justify-content:center;z-index:2;background:radial-gradient(circle at 50% 50%,#1a2233,#0d0d0d)}
+    .vtile.audio-only .wave-wrap{display:flex}
+    .vtile.audio-only .avatar-fallback{display:none}
+    .vtile .wave-wrap canvas{width:90%;height:56%;max-height:80px}
+    .vtile .vtools{position:absolute;top:6px;left:6px;display:flex;gap:3px;z-index:6;opacity:0;transition:opacity .15s}
+    .vtile:hover .vtools,.vtile.active-opts .vtools{opacity:1}
+    .vtile .vtools button{width:26px;height:26px;border-radius:7px;border:1px solid #555;background:rgba(0,0,0,.7);color:#fff;cursor:pointer;font-size:11px;padding:0}
+    .vtile .resize-h{
+      position:absolute;z-index:8;background:transparent;
+    }
+    .vtile .rh-n{top:0;left:8px;right:8px;height:6px;cursor:ns-resize}
+    .vtile .rh-s{bottom:0;left:8px;right:8px;height:6px;cursor:ns-resize}
+    .vtile .rh-e{right:0;top:8px;bottom:8px;width:6px;cursor:ew-resize}
+    .vtile .rh-w{left:0;top:8px;bottom:8px;width:6px;cursor:ew-resize}
+    .vtile .rh-nw{top:0;left:0;width:12px;height:12px;cursor:nwse-resize}
+    .vtile .rh-ne{top:0;right:0;width:12px;height:12px;cursor:nesw-resize}
+    .vtile .rh-sw{bottom:0;left:0;width:12px;height:12px;cursor:nesw-resize}
+    .vtile .rh-se{bottom:0;right:0;width:12px;height:12px;cursor:nwse-resize}
+
+    /* Fixed CC bar — no tile reflow */
+    #captionBar{
+      flex-shrink:0;min-height:0;max-height:72px;overflow:hidden;
+      background:rgba(0,0,0,.85);color:#fff;font-size:.9rem;line-height:1.35;
+      padding:0;text-align:center;border-top:1px solid #222;
+    }
+    #captionBar.on{padding:8px 14px;min-height:28px}
+    #captionBar .cc-line{opacity:.95}
+    #captionBar .cc-who{color:#7eb6ff;font-size:.72rem;margin-right:6px}
+
+    #videoControls{flex-shrink:0;display:flex;align-items:center;justify-content:center;gap:8px;padding:10px 12px 12px;background:#0a0a0a;border-top:1px solid #222;flex-wrap:wrap}
+    #videoControls .vc-btn{width:44px;height:44px;border-radius:50%;border:2px solid #444;background:#1a1a1a;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:16px}
     #videoControls .vc-btn:hover{background:#2a2a2a;border-color:#fff}
     #videoControls .vc-btn.off{background:#3a1515;border-color:#ff4d6a;color:#ff4d6a}
+    #videoControls .vc-btn.on{border-color:#5b8def;box-shadow:0 0 10px rgba(91,141,239,.35)}
     #videoControls .vc-btn.leave{background:#cc1f1f;border-color:#cc1f1f;width:64px;border-radius:12px;font-size:.85rem}
+    #tileOptsBar{
+      flex-shrink:0;display:none;flex-wrap:wrap;gap:6px;padding:6px 10px;background:#111;border-top:1px solid #222;
+      font-size:.72rem;align-items:center;justify-content:center;
+    }
+    #tileOptsBar.on{display:flex}
+    #tileOptsBar .to-btn{
+      padding:4px 10px;border-radius:999px;border:1px solid #444;background:#1a1a1a;color:#ccc;cursor:pointer
+    }
+    #tileOptsBar .to-btn.on{border-color:#5b8def;color:#fff;background:rgba(91,141,239,.2)}
+    #tileOptsBar .to-label{color:#888;margin-right:4px}
+
 
     .voice-bar .label{width:100%;font-size:.7rem;color:var(--muted)}
     .voice-peers{width:100%;font-size:.75rem;min-height:1.4em;display:flex;flex-wrap:wrap;gap:6px}
@@ -421,12 +497,22 @@
       <div class="meta" id="videoMeta">0 participants</div>
     </div>
     <div id="videoGrid"></div>
+    <div id="captionBar" aria-live="polite"></div>
+    <div id="tileOptsBar">
+      <span class="to-label" id="tileOptsLabel">Tile</span>
+      <button type="button" class="to-btn" data-opt="cc-send" title="Send my captions for this focus">CC send</button>
+      <button type="button" class="to-btn" data-opt="cc-recv" title="Show their captions">CC see</button>
+      <button type="button" class="to-btn" data-opt="pip">PiP</button>
+      <button type="button" class="to-btn" data-opt="crop">Crop</button>
+      <button type="button" class="to-btn" data-opt="reset">Reset layout</button>
+    </div>
     <div id="videoControls">
       <button type="button" class="vc-btn" id="vcMuteBtn" title="Mute">🎤</button>
       <button type="button" class="vc-btn" id="vcCamBtn" title="Camera">📹</button>
       <button type="button" class="vc-btn" id="vcScreenBtn" title="Share screen">🖥️</button>
-      <button type="button" class="vc-btn" id="vcCaptionsBtn" title="Captions">CC</button>
-      <button type="button" class="vc-btn" id="vcExpandBtn" title="Expand / dock">⛶</button>
+      <button type="button" class="vc-btn" id="vcCaptionsBtn" title="Live captions bar">CC</button>
+      <button type="button" class="vc-btn" id="vcChatSideBtn" title="Chat sidebar">💬</button>
+      <button type="button" class="vc-btn" id="vcExpandBtn" title="Fullscreen tab">⛶</button>
       <button type="button" class="vc-btn leave" id="vcLeaveBtn" title="Leave">Leave</button>
     </div>
   </div>
@@ -696,8 +782,15 @@ let _sendingMsg=false;
 const UNSEND_MS=5*60*1000;
 let inVoice=false,muted=false,camOff=false,wantVideo=false,localStream=null,screenStream=null;
 let replyToMid=null,replyToPreview=null,captionsOn=false,captionRecognizer=null;
-const tileCrop=new Map(); // id -> crop class
-const tileCaptions=new Map(); // id -> text
+const tileCrop=new Map();
+const tileCaptions=new Map(); // id -> {text,u,ts}
+const tileLayout=new Map(); // id -> {x,y,w,h}
+const tileCcSend=new Set(); // peer ids we send CC toward (empty = broadcast all when captionsOn)
+const tileCcRecv=new Set(); // peer ids whose CC we show (empty + captionsOn = show all)
+let selectedTileId=null;
+let chatSideMode="right"; // right|left|bottom|off
+let meetingFs=false;
+const waveAnalysers=new Map(); // id -> {ctx,analyser,data,raf}
 
 const inVoicePeers=new Set();
 const peers=new Map();
@@ -1703,8 +1796,8 @@ function connect(){
         return;
       }
       if(data.t==="caption"&&data.id&&data.id!==myId){
-        tileCaptions.set(data.id, String(data.text||"").slice(0,160));
-        renderVideoGrid();
+        tileCaptions.set(data.id, {text:String(data.text||"").slice(0,180), u:data.u||"", ts:Date.now()});
+        updateCaptionBar();
         return;
       }
       if(data.t==="file"&&data.c){
@@ -2009,7 +2102,9 @@ async function startAV(withVideo){
 
 function leaveVoice(silent){
   try{ stopLocalCaptions(); }catch(_){}
-  captionsOn=false;
+  try{ stopAllWaves(); }catch(_){}
+  captionsOn=false; meetingFs=false;
+  document.body.classList.remove("meeting-fs","chat-side-right","chat-side-left","chat-side-bottom");
 
   if(!inVoice&&!localStream)return;
   inVoice=false; muted=false; camOff=false; wantVideo=false;
@@ -2122,23 +2217,221 @@ function showVideoStage(on){
   if(!els.videoStage) return;
   els.videoStage.classList.toggle("on", !!on);
   document.body.classList.toggle("in-call", !!on);
-  if(!on) els.videoStage.classList.remove("expanded");
+  if(!on){
+    meetingFs=false;
+    document.body.classList.remove("meeting-fs","chat-side-right","chat-side-left","chat-side-bottom");
+    stopAllWaves();
+  }
+}
+
+function getGridSize(){
+  const g=els.videoGrid;
+  if(!g) return {w:640,h:360};
+  const r=g.getBoundingClientRect();
+  return {w:Math.max(200,r.width), h:Math.max(120,r.height)};
+}
+
+function defaultLayout(id, index, total){
+  const {w,h}=getGridSize();
+  const cols=Math.ceil(Math.sqrt(total));
+  const rows=Math.ceil(total/cols);
+  const tw=Math.max(140, Math.floor((w-16)/cols)-8);
+  const th=Math.max(100, Math.floor((h-16)/rows)-8);
+  const col=index%cols, row=Math.floor(index/cols);
+  return {x:8+col*(tw+8), y:8+row*(th+8), w:tw, h:th};
+}
+
+function ensureLayout(id, index, total, audioOnly){
+  let L=tileLayout.get(id);
+  if(!L){
+    L=defaultLayout(id, index, total);
+    if(audioOnly){ L.w=Math.min(L.w,160); L.h=Math.min(L.h,110); }
+    tileLayout.set(id, L);
+  }
+  return L;
+}
+
+function stopAllWaves(){
+  for(const[,w] of waveAnalysers){
+    try{ if(w.raf) cancelAnimationFrame(w.raf); }catch(_){}
+    try{ if(w.ctx && w.ctx.state!=="closed") w.ctx.close(); }catch(_){}
+  }
+  waveAnalysers.clear();
+}
+
+function startWave(id, stream, canvas){
+  if(!stream||!canvas) return;
+  stopWave(id);
+  try{
+    const ctx=new (window.AudioContext||window.webkitAudioContext)();
+    const src=ctx.createMediaStreamSource(stream);
+    const analyser=ctx.createAnalyser();
+    analyser.fftSize=128;
+    src.connect(analyser);
+    const data=new Uint8Array(analyser.frequencyBinCount);
+    const c2=canvas.getContext("2d");
+    const entry={ctx,analyser,data,raf:0,canvas,c2};
+    waveAnalysers.set(id, entry);
+    const draw=()=>{
+      if(!waveAnalysers.has(id)) return;
+      entry.raf=requestAnimationFrame(draw);
+      analyser.getByteFrequencyData(data);
+      const W=canvas.width=canvas.clientWidth*2||200;
+      const H=canvas.height=canvas.clientHeight*2||80;
+      c2.clearRect(0,0,W,H);
+      const n=data.length;
+      const barW=W/n;
+      for(let i=0;i<n;i++){
+        const v=data[i]/255;
+        const bh=v*H*0.9;
+        const hue=200+v*120;
+        c2.fillStyle=`hsla(${hue},90%,60%,0.9)`;
+        c2.fillRect(i*barW, H-bh, Math.max(2,barW-1), bh);
+      }
+    };
+    draw();
+  }catch(e){ console.warn("wave", e); }
+}
+function stopWave(id){
+  const w=waveAnalysers.get(id);
+  if(!w) return;
+  try{ if(w.raf) cancelAnimationFrame(w.raf); }catch(_){}
+  try{ if(w.ctx && w.ctx.state!=="closed") w.ctx.close(); }catch(_){}
+  waveAnalysers.delete(id);
+}
+
+function attachTileInteract(div, id){
+  const handles=["n","s","e","w","nw","ne","sw","se"];
+  handles.forEach(dir=>{
+    const h=document.createElement("div");
+    h.className="resize-h rh-"+dir;
+    h.dataset.dir=dir;
+    div.appendChild(h);
+  });
+  let mode=null, sx=0, sy=0, orig=null;
+  const onDown=(e, m)=>{
+    if(e.button!=null && e.button!==0) return;
+    e.preventDefault(); e.stopPropagation();
+    mode=m;
+    selectedTileId=id;
+    updateTileOptsBar();
+    const L=tileLayout.get(id)||{x:0,y:0,w:160,h:120};
+    orig={...L};
+    const pt=e.touches?e.touches[0]:e;
+    sx=pt.clientX; sy=pt.clientY;
+    div.classList.add("active-opts");
+  };
+  div.addEventListener("pointerdown", e=>{
+    if(e.target.closest(".resize-h,.vtools,button")) return;
+    onDown(e, "move");
+    try{ div.setPointerCapture(e.pointerId); }catch(_){}
+  });
+  div.querySelectorAll(".resize-h").forEach(h=>{
+    h.addEventListener("pointerdown", e=>{
+      onDown(e, h.dataset.dir);
+      try{ h.setPointerCapture(e.pointerId); }catch(_){}
+    });
+  });
+  const onMove=e=>{
+    if(!mode||!orig) return;
+    const pt=e.touches?e.touches[0]:e;
+    const dx=pt.clientX-sx, dy=pt.clientY-sy;
+    const {w:gw,h:gh}=getGridSize();
+    let {x,y,w,h}=orig;
+    if(mode==="move"){ x+=dx; y+=dy; }
+    else {
+      if(mode.includes("e")) w=Math.max(100, orig.w+dx);
+      if(mode.includes("s")) h=Math.max(72, orig.h+dy);
+      if(mode.includes("w")){ w=Math.max(100, orig.w-dx); x=orig.x+dx; }
+      if(mode.includes("n")){ h=Math.max(72, orig.h-dy); y=orig.y+dy; }
+    }
+    x=Math.max(0, Math.min(x, gw-40));
+    y=Math.max(0, Math.min(y, gh-40));
+    w=Math.min(w, gw-x);
+    h=Math.min(h, gh-y);
+    tileLayout.set(id, {x,y,w,h});
+    div.style.left=x+"px"; div.style.top=y+"px";
+    div.style.width=w+"px"; div.style.height=h+"px";
+  };
+  const onUp=()=>{ mode=null; orig=null; };
+  window.addEventListener("pointermove", onMove);
+  window.addEventListener("pointerup", onUp);
+  div._cleanupInteract=()=>{
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", onUp);
+  };
+}
+
+function updateCaptionBar(){
+  const bar=$("captionBar");
+  if(!bar) return;
+  if(!captionsOn){
+    bar.classList.remove("on");
+    bar.innerHTML="";
+    return;
+  }
+  // Prefer selected tile, else latest
+  let lines=[];
+  for(const [id,info] of tileCaptions){
+    if(tileCcRecv.size && !tileCcRecv.has(id) && id!==myId) continue;
+    if(typeof info==="string") lines.push({id,u:"",text:info});
+    else lines.push({id,u:info.u||"",text:info.text||""});
+  }
+  if(selectedTileId && tileCaptions.has(selectedTileId)){
+    const info=tileCaptions.get(selectedTileId);
+    const text=typeof info==="string"?info:(info.text||"");
+    const u=typeof info==="string"?"":(info.u||"");
+    lines=[{id:selectedTileId,u,text}];
+  }
+  const last=lines[lines.length-1];
+  if(!last||!last.text){
+    bar.classList.remove("on");
+    bar.innerHTML="";
+    return;
+  }
+  bar.classList.add("on");
+  bar.innerHTML=`<span class="cc-who">${esc(last.u||(last.id===myId?"You":"CC"))}</span><span class="cc-line">${esc(last.text)}</span>`;
+}
+
+function updateTileOptsBar(){
+  const bar=$("tileOptsBar");
+  const lab=$("tileOptsLabel");
+  if(!bar) return;
+  if(!selectedTileId){ bar.classList.remove("on"); return; }
+  bar.classList.add("on");
+  const name=selectedTileId===myId?myName:(peers.get(selectedTileId)?.name||selectedTileId.slice(0,6));
+  if(lab) lab.textContent="Tile · "+name;
+  bar.querySelectorAll("[data-opt]").forEach(btn=>{
+    const opt=btn.dataset.opt;
+    btn.classList.remove("on");
+    if(opt==="cc-send" && (tileCcSend.has(selectedTileId) || (selectedTileId===myId && captionsOn && !tileCcSend.size))) btn.classList.add("on");
+    if(opt==="cc-recv" && (tileCcRecv.has(selectedTileId) || (captionsOn && !tileCcRecv.size))) btn.classList.add("on");
+  });
 }
 
 function renderVideoGrid(){
   if(!els.videoGrid) return;
+  // cleanup old interact listeners
+  els.videoGrid.querySelectorAll(".vtile").forEach(el=>{
+    if(el._cleanupInteract) try{ el._cleanupInteract(); }catch(_){}
+  });
+  stopAllWaves();
+
   const tiles=[];
   if(inVoice && localStream){
     const sharing=!!screenStream;
-    const camLive=localStream.getVideoTracks().some(tr=>tr.readyState==="live");
+    const camLive=localStream.getVideoTracks().some(tr=>tr.readyState==="live"&&tr.enabled);
+    const hasVideo=sharing || (!camOff && camLive);
     tiles.push({
       id:myId,
       name:myName+" (you)"+(sharing?" · screen":""),
       stream: sharing ? screenStream : localStream,
       mirror: !sharing && !camOff && camLive,
-      camOff: !sharing && (camOff || !camLive),
+      camOff: !hasVideo,
+      audioOnly: !hasVideo,
       muted, self:true, screen:sharing,
-      pipStream: (sharing && !camOff && camLive) ? localStream : null
+      pipStream: (sharing && !camOff && camLive) ? localStream : null,
+      audioStream: localStream
     });
   }
   for(const[id,p] of peers){
@@ -2146,22 +2439,39 @@ function renderVideoGrid(){
     const hasV=vTracks.some(tr=>tr.readyState!=="ended" && tr.enabled!==false);
     tiles.push({
       id, name:p.name||id, stream:p.stream, mirror:false,
-      camOff:!hasV, muted:false, self:false, screen:!!p.screen, pipStream:null
+      camOff:!hasV, audioOnly:!hasV, muted:false, self:false, screen:!!p.screen,
+      pipStream:null, audioStream:p.stream
     });
   }
-  const n=Math.max(tiles.length,1);
-  els.videoGrid.className="count-"+Math.min(n,4);
+
+  const total=Math.max(tiles.length,1);
   els.videoGrid.innerHTML="";
-  for(const tile of tiles){
+  tiles.forEach((tile, index)=>{
+    const L=ensureLayout(tile.id, index, total, tile.audioOnly);
     const div=document.createElement("div");
-    div.className="vtile"+(tile.camOff&&!tile.screen?" cam-off":"")+(tile.screen?" screen-share":"");
+    div.className="vtile"
+      +(tile.camOff&&!tile.screen?" cam-off":"")
+      +(tile.screen?" screen-share":"")
+      +(tile.audioOnly?" audio-only":"")
+      +(selectedTileId===tile.id?" active-opts":"");
     div.dataset.id=tile.id;
+    div.style.left=L.x+"px"; div.style.top=L.y+"px";
+    div.style.width=L.w+"px"; div.style.height=L.h+"px";
+
     const fb=document.createElement("div");
     fb.className="avatar-fallback";
     fb.textContent=(tile.name||"?").slice(0,1).toUpperCase();
     div.appendChild(fb);
+
+    // Audio wave for no-video tiles
+    const wave=document.createElement("div");
+    wave.className="wave-wrap";
+    const canvas=document.createElement("canvas");
+    wave.appendChild(canvas);
+    div.appendChild(wave);
+
     let mainVid=null;
-    if(tile.stream){
+    if(tile.stream && !tile.audioOnly){
       mainVid=document.createElement("video");
       mainVid.autoplay=true; mainVid.playsInline=true; mainVid.muted=!!tile.self;
       if(tile.mirror) mainVid.classList.add("mirror");
@@ -2172,7 +2482,10 @@ function renderVideoGrid(){
       div.appendChild(mainVid);
       mainVid.play().catch(()=>{});
     }
-    // Camera PiP on screen share (top-right)
+    if(tile.audioOnly && tile.audioStream){
+      startWave(tile.id, tile.audioStream, canvas);
+    }
+
     if(tile.pipStream){
       const pip=document.createElement("div"); pip.className="pip-cam";
       const pv=document.createElement("video"); pv.autoplay=true; pv.playsInline=true; pv.muted=true;
@@ -2180,58 +2493,83 @@ function renderVideoGrid(){
       const lab=document.createElement("div"); lab.className="pip-label"; lab.textContent="You"; pip.appendChild(lab);
       div.appendChild(pip);
     }
-    // Captions under tile
-    const cap=document.createElement("div");
-    cap.className="vcaption"+(captionsOn&&tileCaptions.get(tile.id)?" on":"");
-    cap.textContent=tileCaptions.get(tile.id)||"";
-    div.appendChild(cap);
-    // Tools: PiP + crop
+
     const tools=document.createElement("div"); tools.className="vtools";
-    const pipBtn=document.createElement("button"); pipBtn.type="button"; pipBtn.title="Picture in Picture"; pipBtn.textContent="⧉";
-    pipBtn.onclick=async e=>{
+    const focusBtn=document.createElement("button"); focusBtn.type="button"; focusBtn.title="Options"; focusBtn.textContent="⋯";
+    focusBtn.onclick=e=>{
       e.stopPropagation();
-      try{
-        if(document.pictureInPictureElement) await document.exitPictureInPicture();
-        if(mainVid && document.pictureInPictureEnabled) await mainVid.requestPictureInPicture();
-      }catch(err){ addMessage({type:"system",text:"PiP: "+(err.message||err.name)}); }
-    };
-    const cropBtn=document.createElement("button"); cropBtn.type="button"; cropBtn.title="Crop position"; cropBtn.textContent="⛶";
-    cropBtn.onclick=e=>{
-      e.stopPropagation();
-      const order=["","crop-top","crop-bottom","crop-left","crop-right"];
-      const cur=tileCrop.get(tile.id)||"";
-      const next=order[(order.indexOf(cur)+1)%order.length];
-      tileCrop.set(tile.id, next);
+      selectedTileId=tile.id;
+      updateTileOptsBar();
       renderVideoGrid();
     };
-    tools.appendChild(pipBtn); tools.appendChild(cropBtn);
+    tools.appendChild(focusBtn);
     div.appendChild(tools);
+
     const name=document.createElement("div"); name.className="vname"; name.textContent=tile.name||"";
     div.appendChild(name);
+
+    attachTileInteract(div, tile.id);
     els.videoGrid.appendChild(div);
-  }
+  });
+
   if(els.videoMeta) els.videoMeta.textContent=tiles.length+" in call";
   updateVoicePeersUI();
+  updateCaptionBar();
+  updateTileOptsBar();
+}
+
+function setMeetingFullscreen(on){
+  meetingFs=!!on;
+  document.body.classList.toggle("meeting-fs", meetingFs);
+  if(!meetingFs){
+    document.body.classList.remove("chat-side-right","chat-side-left","chat-side-bottom");
+  } else if(chatSideMode && chatSideMode!=="off"){
+    document.body.classList.add("chat-side-"+chatSideMode);
+  }
+  const btn=$("vcExpandBtn");
+  if(btn) btn.classList.toggle("on", meetingFs);
+  // relayout tiles to fit
+  setTimeout(()=>{
+    // reset layouts to fit new size
+    const ids=[...tileLayout.keys()];
+    tileLayout.clear();
+    renderVideoGrid();
+  }, 50);
 }
 
 function cycleExpandStage(){
-  if(!els.videoStage) return;
-  els.videoStage.classList.toggle("expanded");
+  setMeetingFullscreen(!meetingFs);
+}
+
+function cycleChatSide(){
+  if(!meetingFs) setMeetingFullscreen(true);
+  const modes=["right","left","bottom","off"];
+  const i=modes.indexOf(chatSideMode);
+  chatSideMode=modes[(i+1)%modes.length];
+  document.body.classList.remove("chat-side-right","chat-side-left","chat-side-bottom");
+  if(chatSideMode!=="off") document.body.classList.add("chat-side-"+chatSideMode);
+  const btn=$("vcChatSideBtn");
+  if(btn){
+    btn.classList.toggle("on", chatSideMode!=="off");
+    btn.title="Chat: "+chatSideMode;
+  }
+  setTimeout(()=>{ tileLayout.clear(); renderVideoGrid(); }, 50);
 }
 
 function toggleCaptions(){
   captionsOn=!captionsOn;
   const btn=$("vcCaptionsBtn");
-  if(btn) btn.classList.toggle("off", !captionsOn);
+  if(btn) btn.classList.toggle("on", captionsOn);
   if(captionsOn) startLocalCaptions();
   else stopLocalCaptions();
-  renderVideoGrid();
+  updateCaptionBar();
 }
 
 function startLocalCaptions(){
+  // Uses Web Speech API; results go to fixed #captionBar only (no grid reflow / no frame glitch)
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
   if(!SR){
-    addMessage({type:"system",text:"Captions unavailable in this browser"});
+    addMessage({type:"system",text:"Live captions need Chrome speech recognition. On ChromeOS enable Live Caption in accessibility for system audio."});
     return;
   }
   try{
@@ -2245,11 +2583,16 @@ function startLocalCaptions(){
       for(let i=ev.resultIndex;i<ev.results.length;i++){
         text+=ev.results[i][0].transcript;
       }
-      text=text.trim().slice(0,160);
+      text=text.trim().slice(0,180);
       if(!text) return;
-      tileCaptions.set(myId, text);
-      renderVideoGrid();
-      if(connected&&authed) sendRaw({t:"caption",id:myId,u:myName,text});
+      tileCaptions.set(myId, {text, u:myName, ts:Date.now()});
+      updateCaptionBar(); // NO renderVideoGrid — avoids tile glitch
+      if(connected&&authed&&captionsOn){
+        // send if broadcasting all, or targeted
+        if(!tileCcSend.size || tileCcSend.has(myId)){
+          sendRaw({t:"caption",id:myId,u:myName,text});
+        }
+      }
     };
     captionRecognizer.onerror=()=>{};
     captionRecognizer.start();
@@ -2260,7 +2603,38 @@ function stopLocalCaptions(){
   try{ if(captionRecognizer){ captionRecognizer.onresult=null; captionRecognizer.stop(); } }catch(_){}
   captionRecognizer=null;
   tileCaptions.delete(myId);
+  updateCaptionBar();
 }
+
+function handleTileOpt(opt){
+  if(!selectedTileId) return;
+  const id=selectedTileId;
+  if(opt==="cc-send"){
+    if(tileCcSend.has(id)) tileCcSend.delete(id);
+    else tileCcSend.add(id);
+    if(!captionsOn) toggleCaptions();
+  } else if(opt==="cc-recv"){
+    if(tileCcRecv.has(id)) tileCcRecv.delete(id);
+    else tileCcRecv.add(id);
+    updateCaptionBar();
+  } else if(opt==="pip"){
+    const vid=[...els.videoGrid.querySelectorAll(".vtile")].find(el=>el.dataset.id===id)?.querySelector("video");
+    if(vid && document.pictureInPictureEnabled){
+      if(document.pictureInPictureElement) document.exitPictureInPicture().catch(()=>{});
+      else vid.requestPictureInPicture().catch(err=>addMessage({type:"system",text:"PiP: "+(err.message||err.name)}));
+    }
+  } else if(opt==="crop"){
+    const order=["","crop-top","crop-bottom","crop-left","crop-right"];
+    const cur=tileCrop.get(id)||"";
+    tileCrop.set(id, order[(order.indexOf(cur)+1)%order.length]);
+    renderVideoGrid();
+  } else if(opt==="reset"){
+    tileLayout.clear();
+    renderVideoGrid();
+  }
+  updateTileOptsBar();
+}
+
 
 
 function resolvePeerName(id, fallback){
@@ -2659,7 +3033,12 @@ if(els.vcCamBtn) els.vcCamBtn.onclick=toggleCam;
 if(els.vcScreenBtn) els.vcScreenBtn.onclick=toggleScreen;
 if($("vcCaptionsBtn")) $("vcCaptionsBtn").onclick=toggleCaptions;
 if($("vcExpandBtn")) $("vcExpandBtn").onclick=cycleExpandStage;
+if($("vcChatSideBtn")) $("vcChatSideBtn").onclick=cycleChatSide;
 if($("replyBarClear")) $("replyBarClear").onclick=clearReply;
+if($("tileOptsBar")) $("tileOptsBar").onclick=e=>{
+  const b=e.target.closest("[data-opt]");
+  if(b) handleTileOpt(b.dataset.opt);
+};
 if(els.vcLeaveBtn) els.vcLeaveBtn.onclick=()=>leaveVoice(false);
 els.applySettingsBtn.onclick=()=>{if(!isRoomCreator()){addMessage({type:"system",text:"Only the room creator can change settings."});return;}roomSettings={text:els.setText.checked,voice:els.setVoice.checked,video:els.setVideo?els.setVideo.checked:true,files:els.setFiles.checked};sendRaw({t:"settings",id:myId,settings:roomSettings});applySettingsToUI();addMessage({type:"system",text:"Settings applied"});};
 els.applyAclBtn.onclick=()=>{
