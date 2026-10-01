@@ -160,9 +160,16 @@
     .vtile.audio-only .wave-wrap{display:flex}
     .vtile.audio-only .avatar-fallback{display:none}
     .vtile .wave-wrap canvas{width:90%;height:56%;max-height:80px}
-    .vtile .vtools{position:absolute;top:6px;left:6px;display:flex;gap:3px;z-index:6;opacity:0;transition:opacity .15s}
-    .vtile:hover .vtools,.vtile.active-opts .vtools{opacity:1}
-    .vtile .vtools button{width:26px;height:26px;border-radius:7px;border:1px solid #555;background:rgba(0,0,0,.7);color:#fff;cursor:pointer;font-size:11px;padding:0}
+    .vtile .vtools{position:absolute;top:6px;left:6px;display:flex;gap:3px;z-index:12;opacity:1;pointer-events:auto}
+    .vtile .vtools button{width:28px;height:28px;border-radius:8px;border:1px solid #666;background:rgba(0,0,0,.8);color:#fff;cursor:pointer;font-size:12px;padding:0;pointer-events:auto}
+    .vtile .vtools button:hover{border-color:#fff;background:#222}
+    .vtile.listening-only .wave-wrap{display:flex;opacity:.55}
+    .vtile .share-badge{position:absolute;top:6px;right:6px;z-index:12;font-size:.65rem;padding:2px 7px;border-radius:999px;background:rgba(91,141,239,.85);color:#fff;pointer-events:none}
+    .vtile .health-badge{position:absolute;bottom:28px;left:8px;z-index:12;font-size:.62rem;padding:2px 6px;border-radius:6px;background:rgba(0,0,0,.7);color:#f6c;pointer-events:none}
+    #shareMenu{display:none;position:fixed;z-index:100;background:#111;border:2px solid #fff;border-radius:12px;padding:8px;flex-direction:column;gap:4px;min-width:200px;box-shadow:0 8px 24px rgba(0,0,0,.5)}
+    #shareMenu.on{display:flex}
+    #shareMenu button{text-align:left;padding:8px 12px;border:1px solid #333;border-radius:8px;background:#1a1a1a;color:#fff;cursor:pointer;font-size:.82rem}
+    #shareMenu button:hover{border-color:#5b8def}
     .vtile .resize-h{
       position:absolute;z-index:8;background:transparent;
     }
@@ -541,6 +548,13 @@
   
 
 
+  <div id="shareMenu">
+    <button type="button" data-share="screen">🖥️ Full screen + audio</button>
+    <button type="button" data-share="window">🪟 Window</button>
+    <button type="button" data-share="tab">📑 This / a browser tab</button>
+    <button type="button" data-share="tab-audio">🔊 Tab or device audio only</button>
+    <button type="button" data-share="stop" style="border-color:#ff4d6a;color:#ff4d6a">Stop sharing</button>
+  </div>
   <div id="newChatModal"><div class="modal-box">
     <h3>Start chat</h3>
     <label class="chk"><input type="checkbox" id="ncEncrypted" checked /> Encrypted (AES)</label>
@@ -790,7 +804,11 @@ const tileCcRecv=new Set(); // peer ids whose CC we show (empty + captionsOn = s
 let selectedTileId=null;
 let chatSideMode="right"; // right|left|bottom|off
 let meetingFs=false;
-const waveAnalysers=new Map(); // id -> {ctx,analyser,data,raf}
+const waveAnalysers=new Map();
+let shareInfo=null; // {surface,audio,label}
+const peerHealth=new Map(); // id -> {aBytes,vBytes,lastA,lastV,lastOk,noMediaTicks}
+let _rgTimer=null;
+let _healthTimer=null;
 
 const inVoicePeers=new Set();
 const peers=new Map();
@@ -1296,8 +1314,11 @@ function setVoiceUI(){
   if(els.vcCamBtn){els.vcCamBtn.classList.toggle("off",camOff);els.vcCamBtn.textContent=camOff?"📷":"📹";}
   if(els.vcScreenBtn){
     els.vcScreenBtn.classList.toggle("off",!screenStream);
+    els.vcScreenBtn.classList.toggle("on",!!screenStream);
     els.vcScreenBtn.style.outline=screenStream?"2px solid #5b8def":"";
-    els.vcScreenBtn.title=screenStream?"Stop sharing":"Share screen (ChromeOS ready)";
+    els.vcScreenBtn.title=screenStream
+      ?("Sharing "+((shareInfo&&shareInfo.label)||"…")+" — click to change/stop")
+      :"Share tab / screen / audio";
   }
   updateVoicePeersUI();
   const mode=inVoice?(screenStream?"connected · screen":(wantVideo?"connected · video":"connected · voice")):(connected?"connected · encrypted":"disconnected");
@@ -1850,9 +1871,16 @@ function connect(){
         if(inVoice){
           const iAmInitiator = String(myId) > String(data.id);
           ensurePeer(data.id, data.u||resolvePeerName(data.id, data.id), iAmInitiator);
-          if(peers.has(data.id) && data.u) peers.get(data.id).name = data.u;
-          if(wantVideo||data.video||data.screen){ showVideoStage(true); renderVideoGrid(); }
-          addMessage({type:"system",text:"VC peer: "+(data.u||data.id)+(data.video?" · video":"")+(data.screen?" · screen":"")});
+          if(peers.has(data.id)){
+            if(data.u) peers.get(data.id).name = data.u;
+            peers.get(data.id).screen = !!data.screen;
+            peers.get(data.id).share = data.share||null;
+          }
+          showVideoStage(true);
+          if(typeof scheduleRenderGrid==="function") scheduleRenderGrid();
+          else renderVideoGrid();
+          const sh=data.share?(" · share "+(data.share.label||"")):(data.screen?" · screen":"");
+          addMessage({type:"system",text:"VC peer: "+(data.u||data.id)+(data.video?" · video":"")+sh});
         }
         return;
       }
@@ -2177,50 +2205,180 @@ function sdpPayload(desc){
  * Tracks are applied only via replaceTrack — never addTrack after creation.
  */
 
-async function toggleScreen(){
-  if(!inVoice||!localStream){
-    addMessage({type:"system",text:"Join voice/video first"});return;
-  }
+function openShareMenu(ev){
+  const menu=$("shareMenu");
+  if(!menu){ startShare("screen"); return; }
+  if(!inVoice||!localStream){ addMessage({type:"system",text:"Join voice/video first"}); return; }
+  menu.classList.add("on");
+  const anchor=(ev&&ev.currentTarget)||els.vcScreenBtn||document.body;
+  const r=anchor.getBoundingClientRect?anchor.getBoundingClientRect():{left:20,top:80,bottom:120};
+  menu.style.left=Math.min(window.innerWidth-220, Math.max(8, r.left-20))+"px";
+  menu.style.top=Math.max(8, r.top-8-180)+"px";
+  const stopBtn=menu.querySelector('[data-share="stop"]');
+  if(stopBtn) stopBtn.style.display=screenStream?"block":"none";
+}
+function closeShareMenu(){ const m=$("shareMenu"); if(m) m.classList.remove("on"); }
+
+async function toggleScreen(ev){
+  if(screenStream) return startShare("stop");
+  openShareMenu(ev||{currentTarget:els.vcScreenBtn});
+}
+
+async function startShare(mode){
+  closeShareMenu();
+  if(!inVoice||!localStream){ addMessage({type:"system",text:"Join voice/video first"}); return; }
   try{
-    if(screenStream){
-      screenStream.getTracks().forEach(tr=>{try{tr.stop();}catch(_){}});
-      screenStream=null;
+    if(mode==="stop"){
+      if(screenStream){
+        try{ screenStream.getTracks().forEach(tr=>tr.stop()); }catch(_){}
+        screenStream=null;
+      }
+      shareInfo=null;
       const cam=localStream.getVideoTracks().find(tr=>tr.readyState==="live"&&tr.enabled);
       await setOutboundVideoTrack(cam||null);
-      renderVideoGrid(); setVoiceUI();
-      addMessage({type:"system",text:"Screen share stopped"});
+      scheduleRenderGrid();
+      setVoiceUI();
+      sendRaw({t:"voice-join",u:myName,id:myId,ipId:myIpId,video:!!wantVideo,screen:false,share:null});
+      addMessage({type:"system",text:"Share stopped"});
       return;
     }
-    let stream=null, err=null;
-    for(const opts of [
-      {video:true,audio:true,selfBrowserSurface:"exclude",systemAudio:"include"},
-      {video:true,audio:false}
-    ]){
-      try{ stream=await navigator.mediaDevices.getDisplayMedia(opts); break; }
-      catch(e){ err=e; }
+    const audioOnly=(mode==="tab-audio");
+    let constraints;
+    if(mode==="tab"){
+      constraints={video:{displaySurface:"browser"},audio:true,preferCurrentTab:true,selfBrowserSurface:"include",systemAudio:"include"};
+    } else if(mode==="window"){
+      constraints={video:{displaySurface:"window"},audio:true,systemAudio:"include"};
+    } else if(audioOnly){
+      constraints={video:true,audio:true,systemAudio:"include",preferCurrentTab:true};
+    } else {
+      constraints={video:{displaySurface:"monitor"},audio:true,selfBrowserSurface:"exclude",systemAudio:"include"};
     }
-    if(!stream){ addMessage({type:"system",text:"Screen blocked: "+(err&&err.name||"?")}); return; }
+    let stream=null, err=null;
+    try{ stream=await navigator.mediaDevices.getDisplayMedia(constraints); }
+    catch(e){ err=e; try{ stream=await navigator.mediaDevices.getDisplayMedia({video:true,audio:true}); }catch(e2){ err=e2; } }
+    if(!stream){ addMessage({type:"system",text:"Share blocked: "+(err&&(err.name||err.message)||"?")}); return; }
+
+    if(screenStream){ try{ screenStream.getTracks().forEach(tr=>tr.stop()); }catch(_){} }
+
+    const vTrack=stream.getVideoTracks()[0]||null;
+    const aTracks=stream.getAudioTracks();
+    let surface="unknown";
+    try{ if(vTrack&&vTrack.getSettings) surface=vTrack.getSettings().displaySurface||surface; }catch(_){}
+
+    if(audioOnly){
+      if(vTrack){ try{ vTrack.stop(); stream.removeTrack(vTrack); }catch(_){} }
+      screenStream=stream;
+      shareInfo={surface:surface==="unknown"?"audio":surface,audio:!!aTracks.length,label:"audio-only",audioOnly:true};
+      await setOutboundVideoTrack(null);
+      // best-effort: add display audio tracks to peers
+      for(const[,entry] of peers){
+        try{ if(aTracks[0]) entry.pc.addTrack(aTracks[0], stream); }catch(_){}
+      }
+      aTracks.forEach(tr=>{ tr.onended=()=>{ if(screenStream) startShare("stop"); }; });
+      showVideoStage(true); scheduleRenderGrid(); setVoiceUI();
+      sendRaw({t:"voice-join",u:myName,id:myId,ipId:myIpId,video:false,screen:true,share:shareInfo});
+      addMessage({type:"system",text:"Sharing audio only"});
+      return;
+    }
+
     screenStream=stream;
-    const dt=stream.getVideoTracks()[0];
-    try{ dt.contentHint="detail"; }catch(_){}
-    dt.onended=()=>{ if(screenStream) toggleScreen(); };
-    await setOutboundVideoTrack(dt);
-    showVideoStage(true); renderVideoGrid(); setVoiceUI();
-    sendRaw({t:"voice-join",u:myName,id:myId,ipId:myIpId,video:!!wantVideo,screen:true});
-    addMessage({type:"system",text:"Sharing screen"});
+    if(vTrack){
+      try{ vTrack.contentHint="detail"; }catch(_){}
+      vTrack.onended=()=>{ if(screenStream) startShare("stop"); };
+    }
+    shareInfo={
+      surface,
+      audio:aTracks.length>0,
+      label: surface==="browser"?"tab":(surface==="window"?"window":(surface==="monitor"?"screen":String(surface))),
+      audioOnly:false
+    };
+    await setOutboundVideoTrack(vTrack);
+    showVideoStage(true); scheduleRenderGrid(); setVoiceUI();
+    sendRaw({t:"voice-join",u:myName,id:myId,ipId:myIpId,video:!!wantVideo,screen:true,share:shareInfo});
+    addMessage({type:"system",text:"Sharing "+shareInfo.label+(shareInfo.audio?" · +audio":"")});
   }catch(e){
-    addMessage({type:"system",text:"Screen cancelled"});
+    addMessage({type:"system",text:"Share cancelled"});
   }
+}
+
+function scheduleRenderGrid(){
+  if(_rgTimer) return;
+  _rgTimer=setTimeout(()=>{ _rgTimer=null; renderVideoGrid(); }, 50);
+}
+
+function startPeerHealthMonitor(){
+  if(_healthTimer) return;
+  _healthTimer=setInterval(async ()=>{
+    if(!inVoice) return;
+    for(const [id, entry] of [...peers.entries()]){
+      if(!entry.pc) continue;
+      try{
+        const stats=await entry.pc.getStats();
+        let aBytes=0, vBytes=0;
+        stats.forEach(r=>{
+          if(r.type==="inbound-rtp" && r.kind==="audio") aBytes=r.bytesReceived||0;
+          if(r.type==="inbound-rtp" && r.kind==="video") vBytes=r.bytesReceived||0;
+        });
+        const prev=peerHealth.get(id)||{aBytes:0,vBytes:0,lastA:Date.now(),lastV:Date.now(),noMediaTicks:0};
+        const now=Date.now();
+        const aLive=aBytes>prev.aBytes;
+        const vLive=vBytes>prev.vBytes;
+        if(aLive) prev.lastA=now;
+        if(vLive) prev.lastV=now;
+        prev.aBytes=aBytes; prev.vBytes=vBytes;
+        const aRecent=now-prev.lastA<5000;
+        const vRecent=now-prev.lastV<5000;
+        // video stalled, audio ok → force audio-only presentation
+        if(aRecent && !vRecent && entry.stream){
+          const vts=entry.stream.getVideoTracks();
+          if(vts.length && entry.hasVideo!==false){
+            entry.hasVideo=false;
+            entry._videoStalled=true;
+            scheduleRenderGrid();
+          }
+        } else if(vRecent){
+          entry.hasVideo=true;
+          entry._videoStalled=false;
+        }
+        // nothing for 12s → remove tile
+        if(!aRecent && !vRecent){
+          prev.noMediaTicks=(prev.noMediaTicks||0)+1;
+          if(prev.noMediaTicks>=4){ // ~12s at 3s interval
+            addMessage({type:"system",text:"Link dead · removed "+(entry.name||id)});
+            removePeer(id);
+            inVoicePeers.delete(id);
+            peerHealth.delete(id);
+            continue;
+          }
+        } else {
+          prev.noMediaTicks=0;
+        }
+        peerHealth.set(id, prev);
+        // update badge without full grid rebuild
+        const badge=els.videoGrid&&els.videoGrid.querySelector(`.vtile[data-id="${id}"] .health-badge`);
+        if(badge){
+          if(entry._videoStalled) badge.textContent="video stalled · audio ok";
+          else if(!aRecent&&!vRecent) badge.textContent="no media…";
+          else badge.textContent="";
+        }
+      }catch(_){}
+    }
+  }, 3000);
+}
+function stopPeerHealthMonitor(){
+  if(_healthTimer){ clearInterval(_healthTimer); _healthTimer=null; }
 }
 
 function showVideoStage(on){
   if(!els.videoStage) return;
   els.videoStage.classList.toggle("on", !!on);
   document.body.classList.toggle("in-call", !!on);
-  if(!on){
+  if(on) startPeerHealthMonitor();
+  else {
     meetingFs=false;
     document.body.classList.remove("meeting-fs","chat-side-right","chat-side-left","chat-side-bottom");
     stopAllWaves();
+    stopPeerHealthMonitor();
   }
 }
 
@@ -2272,20 +2430,24 @@ function startWave(id, stream, canvas){
     const c2=canvas.getContext("2d");
     const entry={ctx,analyser,data,raf:0,canvas,c2};
     waveAnalysers.set(id, entry);
-    const draw=()=>{
+    let last=0;
+    const draw=(ts)=>{
       if(!waveAnalysers.has(id)) return;
       entry.raf=requestAnimationFrame(draw);
+      if(document.hidden) return;
+      if(ts && ts-last<50) return; // ~20fps
+      last=ts||0;
       analyser.getByteFrequencyData(data);
-      const W=canvas.width=canvas.clientWidth*2||200;
-      const H=canvas.height=canvas.clientHeight*2||80;
+      const W=canvas.width=canvas.clientWidth||100;
+      const H=canvas.height=canvas.clientHeight||40;
       c2.clearRect(0,0,W,H);
-      const n=data.length;
+      const n=Math.min(data.length, 32);
       const barW=W/n;
       for(let i=0;i<n;i++){
         const v=data[i]/255;
         const bh=v*H*0.9;
         const hue=200+v*120;
-        c2.fillStyle=`hsla(${hue},90%,60%,0.9)`;
+        c2.fillStyle="hsla("+hue+",90%,60%,0.9)";
         c2.fillRect(i*barW, H-bh, Math.max(2,barW-1), bh);
       }
     };
@@ -2420,27 +2582,45 @@ function renderVideoGrid(){
   const tiles=[];
   if(inVoice && localStream){
     const sharing=!!screenStream;
+    const audioOnlyShare=!!(shareInfo&&shareInfo.audioOnly);
     const camLive=localStream.getVideoTracks().some(tr=>tr.readyState==="live"&&tr.enabled);
-    const hasVideo=sharing || (!camOff && camLive);
+    const hasVideo=(!audioOnlyShare && sharing) || (!camOff && camLive && !audioOnlyShare);
+    const listeningOnly=!hasVideo && !!muted && !(shareInfo&&shareInfo.audio);
     tiles.push({
       id:myId,
-      name:myName+" (you)"+(sharing?" · screen":""),
-      stream: sharing ? screenStream : localStream,
+      name:myName+" (you)"+(sharing?(audioOnlyShare?" · audio share":" · "+((shareInfo&&shareInfo.label)||"share")):""),
+      stream: (sharing && !audioOnlyShare) ? screenStream : localStream,
       mirror: !sharing && !camOff && camLive,
       camOff: !hasVideo,
       audioOnly: !hasVideo,
-      muted, self:true, screen:sharing,
-      pipStream: (sharing && !camOff && camLive) ? localStream : null,
-      audioStream: localStream
+      listeningOnly: !!listeningOnly,
+      muted, self:true, screen:sharing && !audioOnlyShare,
+      pipStream: (sharing && !audioOnlyShare && !camOff && camLive) ? localStream : null,
+      audioStream: localStream,
+      share: shareInfo
     });
   }
   for(const[id,p] of peers){
     const vTracks=(p.stream&&p.stream.getVideoTracks())||[];
-    const hasV=vTracks.some(tr=>tr.readyState!=="ended" && tr.enabled!==false);
+    const aTracks=(p.stream&&p.stream.getAudioTracks())||[];
+    let hasV=vTracks.some(tr=>tr.readyState!=="ended" && tr.enabled!==false);
+    if(p._videoStalled) hasV=false;
+    const hasA=aTracks.some(tr=>tr.readyState!=="ended");
+    const listeningOnly=!hasV && !hasA;
     tiles.push({
       id, name:p.name||id, stream:p.stream, mirror:false,
-      camOff:!hasV, audioOnly:!hasV, muted:false, self:false, screen:!!p.screen,
-      pipStream:null, audioStream:p.stream
+      camOff:!hasV, audioOnly:!hasV, listeningOnly:listeningOnly, muted:false, self:false,
+      screen:!!p.screen, pipStream:null, audioStream:p.stream,
+      share:p.share||null
+    });
+  }
+  for(const id of inVoicePeers){
+    if(id===myId || peers.has(id)) continue;
+    const info=online.get(id)||{};
+    tiles.push({
+      id, name:info.u||id, stream:null, mirror:false,
+      camOff:true, audioOnly:true, listeningOnly:true, muted:false, self:false,
+      screen:false, pipStream:null, audioStream:null, share:null
     });
   }
 
@@ -2452,7 +2632,7 @@ function renderVideoGrid(){
     div.className="vtile"
       +(tile.camOff&&!tile.screen?" cam-off":"")
       +(tile.screen?" screen-share":"")
-      +(tile.audioOnly?" audio-only":"")
+      +(tile.audioOnly||tile.listeningOnly?" audio-only":"")+(tile.listeningOnly?" listening-only":"")
       +(selectedTileId===tile.id?" active-opts":"");
     div.dataset.id=tile.id;
     div.style.left=L.x+"px"; div.style.top=L.y+"px";
@@ -2494,18 +2674,45 @@ function renderVideoGrid(){
       div.appendChild(pip);
     }
 
+    if(tile.share && tile.share.label){
+      const sb=document.createElement("div");
+      sb.className="share-badge";
+      sb.textContent=(tile.share.audioOnly?"🔊 ":"")+(tile.share.label)+(tile.share.audio&&!tile.share.audioOnly?"+a":"");
+      div.appendChild(sb);
+    }
+    const hb=document.createElement("div");
+    hb.className="health-badge";
+    if(tile.listeningOnly) hb.textContent="listening";
+    else if(peers.get(tile.id) && peers.get(tile.id)._videoStalled) hb.textContent="video stalled · audio ok";
+    div.appendChild(hb);
+
     const tools=document.createElement("div"); tools.className="vtools";
-    const focusBtn=document.createElement("button"); focusBtn.type="button"; focusBtn.title="Options"; focusBtn.textContent="⋯";
-    focusBtn.onclick=e=>{
-      e.stopPropagation();
-      selectedTileId=tile.id;
-      updateTileOptsBar();
-      renderVideoGrid();
-    };
-    tools.appendChild(focusBtn);
+    function mkBtn(title, text, fn){
+      const b=document.createElement("button");
+      b.type="button"; b.title=title; b.textContent=text;
+      b.addEventListener("pointerdown", function(e){ e.stopPropagation(); e.preventDefault(); });
+      b.addEventListener("click", function(e){
+        e.stopPropagation(); e.preventDefault();
+        selectedTileId=tile.id;
+        fn();
+        updateTileOptsBar();
+        if(els.videoGrid){
+          els.videoGrid.querySelectorAll(".vtile").forEach(function(el){
+            el.classList.toggle("active-opts", el.dataset.id===tile.id);
+          });
+        }
+      });
+      return b;
+    }
+    tools.appendChild(mkBtn("Options","⋯", function(){
+      var bar=$("tileOptsBar"); if(bar) bar.classList.add("on");
+    }));
+    tools.appendChild(mkBtn("PiP","⧉", function(){ handleTileOpt("pip"); }));
+    tools.appendChild(mkBtn("Crop","⛶", function(){ handleTileOpt("crop"); }));
     div.appendChild(tools);
 
-    const name=document.createElement("div"); name.className="vname"; name.textContent=tile.name||"";
+    const name=document.createElement("div"); name.className="vname";
+    name.textContent=(tile.name||"")+(tile.listeningOnly?" · listening":"");
     div.appendChild(name);
 
     attachTileInteract(div, tile.id);
@@ -3031,6 +3238,19 @@ els.voiceLeaveBtn.onclick=()=>leaveVoice(false);els.voiceMuteBtn.onclick=toggleM
 if(els.vcMuteBtn) els.vcMuteBtn.onclick=toggleMute;
 if(els.vcCamBtn) els.vcCamBtn.onclick=toggleCam;
 if(els.vcScreenBtn) els.vcScreenBtn.onclick=toggleScreen;
+if($("shareMenu")){
+  $("shareMenu").onclick=function(e){
+    var b=e.target.closest("[data-share]");
+    if(b) startShare(b.dataset.share);
+  };
+}
+document.addEventListener("click", function(e){
+  var menu=$("shareMenu");
+  if(!menu||!menu.classList.contains("on")) return;
+  if(menu.contains(e.target)) return;
+  if(els.vcScreenBtn&&els.vcScreenBtn.contains(e.target)) return;
+  closeShareMenu();
+});
 if($("vcCaptionsBtn")) $("vcCaptionsBtn").onclick=toggleCaptions;
 if($("vcExpandBtn")) $("vcExpandBtn").onclick=cycleExpandStage;
 if($("vcChatSideBtn")) $("vcChatSideBtn").onclick=cycleChatSide;
