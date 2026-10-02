@@ -306,7 +306,6 @@
   </style>
 </head>
 <body>
-<form id="v0auth" onsubmit="return false;" style="display:none" aria-hidden="true"></form>
 <!-- V0RT3X tab cloaker — standalone; reuse on other sites via tab-cloaker.js -->
 <script>
 (function () {
@@ -439,20 +438,18 @@
         <div class="id-line" id="myIdLine">join: —</div>
         <div class="id-line" id="myDevLine">device: —</div>
         <div class="id-line" id="myIpLine">net: —</div>
-        <div class="id-line" id="myTzLine">tz: —</div>
-        <div class="id-line" id="relayModeLine">relay: classic</div>
         <div class="id-line" id="roomPhaseLine">phase: lobby</div>
       </div>
       <div>
         <h2>Room = WSS Link</h2>
         <label for="relay">WebSocket URL</label>
         <input id="relay" placeholder="wss://relay.example/r/my-room" />
-        <p class="hint" style="margin-top:5px">Classic DO room path, or n3xn <code>wss://…workers.dev/ws</code> (special branch). Auto-detects.</p>
+        <p class="hint" style="margin-top:5px">Not saved. One IP-hash per room.</p>
       </div>
       <div>
         <h2>Encryption</h2>
         <label for="passphrase">Shared passphrase</label>
-        <input id="passphrase" form="v0auth" type="password" placeholder="strong secret" autocomplete="off" />
+        <input id="passphrase" type="password" placeholder="strong secret" autocomplete="off" />
       </div>
       <div class="row">
         <button class="btn" id="connectBtn">Connect</button>
@@ -569,7 +566,7 @@
     <label>WebSocket URL</label>
     <input id="ncRelay" placeholder="wss://…" />
     <label>Passphrase (if encrypted)</label>
-    <input id="ncPass" form="v0auth" type="password" placeholder="empty only if unencrypted" />
+    <input id="ncPass" type="password" placeholder="empty only if unencrypted" />
     <button class="btn" id="ncStartBtn" style="width:100%">Open in new tab</button>
     <button class="btn btn-danger" id="ncCancelBtn" style="width:100%">Cancel</button>
   </div></div>
@@ -604,7 +601,7 @@
     <label>Account username</label>
     <input id="loginUser" placeholder="username or blank for guest" />
     <label>Password</label>
-    <input id="loginPass" form="v0auth" type="password" placeholder="password" autocomplete="off" />
+    <input id="loginPass" type="password" placeholder="password" autocomplete="off" />
     <button class="btn" id="loginBtn" style="width:100%">Enter room</button>
     <button class="btn btn-danger" id="loginCancel" style="width:100%">Cancel</button>
   </div></div>
@@ -657,12 +654,6 @@ let myDeviceHash=myDeviceRaw.slice(0,10);
 hashStr("v0rt3x-device|"+myDeviceRaw).then(h=>{ myDeviceHash=h; try{ if(typeof els!=="undefined"&&els.myDevLine) els.myDevLine.textContent="device: "+h; }catch(_){}});
 
 let roomStarted=false;
-let relayMode="classic"; // classic | n3xn
-let myNetHash=null;
-let myTimezone=(typeof Intl!=="undefined"&&Intl.DateTimeFormat)?(Intl.DateTimeFormat().resolvedOptions().timeZone||"UTC"):"UTC";
-let myJoinHash=null; // n3xn joinHash (same as myId when n3xn)
-const n3xnPending=new Map(); // id -> resolve for RPC
-
 const HOST_HIST_MAX=40;
 const HOST_IDB_KEY="v0rt3x_host_hist";
 
@@ -780,14 +771,13 @@ function updatePhaseUI(){
   if(els.bcastHistBtn) els.bcastHistBtn.disabled=!isAdmin()||!roomStarted;
 }
 
-function identityTags(deviceHash, ipId, netHash){
+function identityTags(deviceHash, ipId){
   let s="";
   if(deviceHash&&deviceHash===myDeviceHash) s+='<span class="tag same-dev">same device</span>';
-  if((ipId&&myIpId&&ipId===myIpId) || (netHash&&myNetHash&&netHash===myNetHash))
-    s+='<span class="tag same-ip">same net</span>';
+  if(ipId&&myIpId&&ipId===myIpId) s+='<span class="tag same-ip">same net</span>';
   return s;
 }
-
+;
 const MAX_FILE=1.5*1024*1024;
 let ws=null,aesKey=null,connected=false,authed=false;
 let myId=crypto.randomUUID().slice(0,8),myIpId=null,mySid=null;
@@ -1358,235 +1348,7 @@ function volumeLoop(){
   for(const[id,p]of peers){if(p.analyser){p.analyser.getByteFrequencyData(data);let s=0;for(let i=0;i<data.length;i++)s+=data[i];setPeerTalking(id,(s/data.length)/255);}}
   volRaf=requestAnimationFrame(volumeLoop);
 }
-function normalizeRelayUrl(url){
-  let u=String(url||"").trim();
-  if(!u) return u;
-  // n3xn workers often expose /ws — auto-append if bare workers.dev root
-  try{
-    const parsed=new URL(u.replace(/^ws/,"http"));
-    if((/workers\.dev$/i.test(parsed.hostname)||/n3xn/i.test(parsed.hostname)) && (parsed.pathname==="/"||parsed.pathname==="")){
-      parsed.pathname="/ws";
-      u=parsed.toString().replace(/^http/,"ws");
-    }
-  }catch(_){}
-  return u;
-}
-
-function detectN3xnUrl(url){
-  const s=String(url||"");
-  return /\/ws\/?$/i.test(s) || /n3xn/i.test(s) || /workers\.dev/i.test(s);
-}
-
-function n3xnSend(opcode, payload, id){
-  if(!ws||ws.readyState!==1) return null;
-  const packet={opcode, payload:payload||{}};
-  if(id) packet.id=id;
-  ws.send(JSON.stringify(packet));
-  return id;
-}
-
-function n3xnRpc(opcode, payload, timeoutMs){
-  return new Promise((resolve,reject)=>{
-    const id=(typeof crypto!=="undefined"&&crypto.randomUUID)?crypto.randomUUID():String(Date.now())+Math.random();
-    const to=setTimeout(()=>{ n3xnPending.delete(id); reject(new Error("n3xn rpc timeout "+opcode)); }, timeoutMs||8000);
-    n3xnPending.set(id, {resolve, reject, to});
-    n3xnSend(opcode, payload, id);
-  });
-}
-
-/** Classic V0RT3X JSON {t:...} OR n3xn {opcode,payload} */
-function sendRaw(o){
-  if(!ws||ws.readyState!==1) return;
-  if(relayMode==="n3xn"){
-    // Map chat envelope onto n3xn CHAT_* opcodes (requires worker chat patch)
-    const roomId=currentRoomKey||"default";
-    if(!o||!o.t){
-      n3xnSend("WSS_RELAY_MSG", { targetJoinHash:o&&o.to, message:o });
-      return;
-    }
-    if(o.t==="join"){
-      n3xnSend("CHAT_JOIN", {
-        roomId, u:o.u, deviceHash:o.deviceHash||myDeviceHash,
-        netHash:myNetHash, timezone:myTimezone, account:o.account||null
-      });
-      return;
-    }
-    if(o.t==="signal"){
-      // WebRTC signaling via n3xn RTC_* when possible
-      const kind=o.kind;
-      const target=o.to;
-      if(kind==="offer"&&o.payload){
-        n3xnSend("RTC_OFFER", { targetJoinHash:target, offer:o.payload });
-        // also mirror as CHAT for clients that only speak V0RT3X-over-CHAT
-        n3xnSend("CHAT_MSG", { roomId, message:o });
-        return;
-      }
-      if(kind==="answer"&&o.payload){
-        n3xnSend("RTC_ANSWER", { targetJoinHash:target, answer:o.payload });
-        n3xnSend("CHAT_MSG", { roomId, message:o });
-        return;
-      }
-      if(kind==="ice"&&o.payload){
-        n3xnSend("RTC_ICE", { targetJoinHash:target, candidate:o.payload });
-        n3xnSend("CHAT_MSG", { roomId, message:o });
-        return;
-      }
-    }
-    // Targeted PM / directed packet
-    if(o.to){
-      n3xnSend("WSS_RELAY_MSG", { targetJoinHash:o.to, message:o });
-      n3xnSend("CHAT_MSG", { roomId, message:o });
-      return;
-    }
-    // Room broadcast
-    n3xnSend("CHAT_MSG", { roomId, message:o });
-    return;
-  }
-  ws.send(JSON.stringify(o));
-}
-
-function applyN3xnIdentity(payload){
-  if(!payload) return;
-  relayMode="n3xn";
-  if(payload.joinHash){
-    myJoinHash=payload.joinHash;
-    myId=payload.joinHash; // stable session id from edge
-  }
-  if(payload.deviceHash){
-    myDeviceHash=payload.deviceHash;
-  }
-  if(payload.netHash){
-    myNetHash=payload.netHash;
-    myIpId=payload.netHash; // reuse UI field as net hash
-  }
-  if(payload.timezone) myTimezone=payload.timezone;
-  try{
-    if(els.myIdLine) els.myIdLine.textContent="join: "+(myId||"—");
-    if(els.myDevLine) els.myDevLine.textContent="device: "+(myDeviceHash||"—");
-    if(els.myIpLine) els.myIpLine.textContent="net: "+(myNetHash||"—");
-    if($("myTzLine")) $("myTzLine").textContent="tz: "+(myTimezone||"—");
-    if($("relayModeLine")) $("relayModeLine").textContent="relay: n3xn";
-  }catch(_){}
-}
-
-function handleN3xnPacket(packet){
-  if(!packet||typeof packet!=="object") return false;
-  if(!packet.opcode) return false;
-
-  // RPC responses
-  if(packet.id && n3xnPending.has(packet.id)){
-    const pending=n3xnPending.get(packet.id);
-    n3xnPending.delete(packet.id);
-    clearTimeout(pending.to);
-    pending.resolve(packet.payload);
-  }
-
-  if(packet.opcode==="SYS_INIT"){
-    applyN3xnIdentity(packet.payload||{});
-    // Treat as connected hello for classic flow
-    connected=true;
-    els.disconnectBtn.disabled=false;
-    els.applySettingsBtn.disabled=false;
-    els.applyAclBtn.disabled=false;
-    if($("saveRelayBtn"))$("saveRelayBtn").disabled=false;
-    if($("publishRoomBtn"))$("publishRoomBtn").disabled=false;
-    updatePhaseUI();
-    addMessage({type:"system",text:"n3xn relay · join "+myId+" · device "+(myDeviceHash||"").slice(0,8)+" · net "+(myNetHash||"").slice(0,8)});
-    try{ n3xnSend("PUBLIC_SUBSCRIBE", {}); }catch(_){}
-    try{ n3xnSend("PUBLIC_LIST", {}); }catch(_){}
-    setTimeout(()=>openLoginGate(),300);
-    return true;
-  }
-
-  if(packet.opcode==="CHAT_PEER"){
-    const pl=packet.payload||{};
-    if(pl.type==="join"&&pl.joinHash&&pl.joinHash!==myId){
-      online.set(pl.joinHash,{
-        u:pl.u||"?",
-        ipId:pl.netHash||null,
-        deviceHash:pl.deviceHash||null,
-        netHash:pl.netHash||null,
-        timezone:pl.timezone||null
-      });
-      addMessage({type:"system",text:(pl.u||"someone")+" joined (n3xn)"});
-      if(isAdmin()){
-        hostAnnounce("peer-joined");
-        sendRaw({t:"settings",id:myId,settings:roomSettings});
-        if(acl.enabled) sendRaw({t:"acl",id:myId,acl});
-      }
-    }
-    if(pl.type==="leave"&&pl.joinHash){
-      online.delete(pl.joinHash);
-      addMessage({type:"system",text:"peer left (n3xn)"});
-    }
-    if(pl.type==="roster"&&Array.isArray(pl.peers)){
-      for(const peer of pl.peers){
-        if(peer.joinHash&&peer.joinHash!==myId){
-          online.set(peer.joinHash,{
-            u:peer.u||"?",
-            ipId:peer.netHash||null,
-            deviceHash:peer.deviceHash||null,
-            netHash:peer.netHash||null
-          });
-        }
-      }
-    }
-    return true;
-  }
-
-  if(packet.opcode==="CHAT_MSG"){
-    const pl=packet.payload||{};
-    const msg=pl.message||pl;
-    // Inject as classic message into existing handler path
-    if(msg&&typeof msg==="object"){
-      if(!msg.id && pl.senderJoinHash) msg.id=pl.senderJoinHash;
-      // Re-enter classic handler by synthesizing
-      if(typeof window.__v0HandleClassic==="function"){
-        window.__v0HandleClassic(msg);
-      }
-    }
-    return true;
-  }
-
-  if(packet.opcode==="WSS_RELAY_MSG"){
-    const pl=packet.payload||{};
-    const msg=pl.message;
-    if(msg&&typeof msg==="object"){
-      if(!msg.id && pl.senderJoinHash) msg.id=pl.senderJoinHash;
-      if(typeof window.__v0HandleClassic==="function") window.__v0HandleClassic(msg);
-    }
-    return true;
-  }
-
-  // WebRTC signaling from n3xn transport
-  if(packet.opcode==="RTC_OFFER"||packet.opcode==="RTC_ANSWER"||packet.opcode==="RTC_ICE"){
-    const pl=packet.payload||{};
-    const from=pl.senderJoinHash||pl.from;
-    if(!from||from===myId) return true;
-    let kind="ice", payload=null;
-    if(packet.opcode==="RTC_OFFER"){ kind="offer"; payload=pl.offer; }
-    else if(packet.opcode==="RTC_ANSWER"){ kind="answer"; payload=pl.answer; }
-    else { kind="ice"; payload=pl.candidate; }
-    if(typeof handleSignal==="function"){
-      handleSignal({ id:from, to:myId, u:online.get(from)?.u, kind, payload });
-    }
-    return true;
-  }
-
-  if(packet.opcode==="PUBLIC_LIST"){
-    const rooms=(packet.payload&&packet.payload.rooms)||[];
-    publicRooms=rooms;
-    try{renderPublicList();}catch(_){}
-    return true;
-  }
-  if(packet.opcode==="ERROR"){
-    addMessage({type:"system",text:"n3xn error: "+((packet.payload&&packet.payload.error)||"unknown")});
-    return true;
-  }
-
-  return true; // consumed as n3xn packet even if unhandled opcode
-}
-
+function sendRaw(o){if(ws&&ws.readyState===1)ws.send(JSON.stringify(o));}
 
 function parseAclText(text){
   const accounts={};
@@ -1839,10 +1601,7 @@ function connectPublicDirectory(baseWs){
   const dir=directoryUrlFromRelay(baseWs);if(!dir)return;
   // already connected to same dir?
   if(publicDirWs&&publicDirWs.readyState===1&&publicDirWs._dir===dir){
-    try{publicDirWs.send(JSON.stringify({t:"public-subscribe"}));}catch(_){}
-    try{publicDirWs.send(JSON.stringify({t:"public-sync"}));}catch(_){}
-    try{publicDirWs.send(JSON.stringify({opcode:"PUBLIC_SUBSCRIBE",payload:{}}));}catch(_){}
-    try{publicDirWs.send(JSON.stringify({opcode:"PUBLIC_LIST",payload:{}}));}catch(_){}
+    publicDirWs.send(JSON.stringify({t:"public-sync"}));
     return;
   }
   try{if(publicDirWs)publicDirWs.close();}catch(_){}
@@ -1850,27 +1609,21 @@ function connectPublicDirectory(baseWs){
     publicDirWs=new WebSocket(dir);
     publicDirWs._dir=dir;
     publicDirWs.onopen=()=>{
-      try{publicDirWs.send(JSON.stringify({t:"public-subscribe"}));}catch(_){}
-    try{publicDirWs.send(JSON.stringify({t:"public-sync"}));}catch(_){}
-    try{publicDirWs.send(JSON.stringify({opcode:"PUBLIC_SUBSCRIBE",payload:{}}));}catch(_){}
-    try{publicDirWs.send(JSON.stringify({opcode:"PUBLIC_LIST",payload:{}}));}catch(_){}
+      publicDirWs.send(JSON.stringify({t:"public-sync"}));
       if($("refreshPublicBtn"))$("refreshPublicBtn").disabled=false;
       if($("publishRoomBtn"))$("publishRoomBtn").disabled=!connected;
       if($("unpublishRoomBtn"))$("unpublishRoomBtn").disabled=!publishedUrl;
     };
     publicDirWs.onmessage=ev=>{
       let d;try{d=JSON.parse(ev.data);}catch{return;}
-      if(d.t==="hello"||d.opcode==="SYS_INIT")return;
-      if(d.opcode==="PUBLIC_LIST"&&d.payload&&Array.isArray(d.payload.rooms)){
-        publicRooms=d.payload.rooms;renderPublicList();return;
-      }
+      if(d.t==="hello")return; // ignore room hello on directory
       if(d.t==="public-list"&&Array.isArray(d.rooms)){
-        publicRooms=d.rooms;renderPublicList();return;
+        publicRooms=d.rooms;renderPublicList();
       }
       if(d.t==="public-announce"&&d.room){
         const i=publicRooms.findIndex(x=>x.url===d.room.url);
         if(i>=0)publicRooms[i]=d.room;else publicRooms.push(d.room);
-        renderPublicList();return;
+        renderPublicList();
       }
       if(d.t==="public-unpublish"&&d.url){
         publicRooms=publicRooms.filter(r=>r.url!==d.url);
@@ -1902,7 +1655,6 @@ function publishCurrentRoom(){
     ts:Date.now(),
   };
   publicDirWs.send(JSON.stringify({t:"public-announce",room}));
-  try{publicDirWs.send(JSON.stringify({opcode:"PUBLIC_ANNOUNCE",payload:{room}}));}catch(_){}
   publishedUrl=room.url;
   const i=publicRooms.findIndex(x=>x.url===room.url);
   if(i>=0)publicRooms[i]=room;else publicRooms.push(room);
@@ -1936,19 +1688,7 @@ if($("ncStartBtn"))$("ncStartBtn").onclick=()=>{
 if($("openIdbBtn"))$("openIdbBtn").onclick=()=>{$("idbModal").classList.add("on");renderIdbList();};
 if($("idbCloseBtn"))$("idbCloseBtn").onclick=()=>$("idbModal").classList.remove("on");
 if($("idbSaveConvBtn"))$("idbSaveConvBtn").onclick=()=>saveCurrentConversation();
-if($("refreshPublicBtn"))$("refreshPublicBtn").onclick=()=>{
-  if(publicDirWs&&publicDirWs.readyState===1){
-    try{publicDirWs.send(JSON.stringify({t:"public-subscribe"}));}catch(_){}
-    try{publicDirWs.send(JSON.stringify({t:"public-sync"}));}catch(_){}
-    try{publicDirWs.send(JSON.stringify({opcode:"PUBLIC_SUBSCRIBE",payload:{}}));}catch(_){}
-    try{publicDirWs.send(JSON.stringify({opcode:"PUBLIC_LIST",payload:{}}));}catch(_){}
-  } else if(els.relay.value){
-    connectPublicDirectory(els.relay.value);
-  }
-  if(relayMode==="n3xn"&&ws&&ws.readyState===1){
-    try{n3xnSend("PUBLIC_LIST",{});}catch(_){}
-  }
-};
+if($("refreshPublicBtn"))$("refreshPublicBtn").onclick=()=>{if(publicDirWs&&publicDirWs.readyState===1)publicDirWs.send(JSON.stringify({t:"public-sync"}));else if(els.relay.value)connectPublicDirectory(els.relay.value);};
 if($("publishRoomBtn"))$("publishRoomBtn").onclick=()=>publishCurrentRoom();
 if($("unpublishRoomBtn"))$("unpublishRoomBtn").onclick=()=>unpublishCurrentRoom();
 renderSavedRelays();renderTabBar();
@@ -1956,44 +1696,20 @@ renderSavedRelays();renderTabBar();
 function connect(){
   myId=(typeof uuid==="function"?uuid():Math.random().toString(16).slice(2)).replace(/-/g,"").slice(0,8);
 
-  let url=els.relay.value.trim();
-  const pass=els.passphrase.value;
+  const url=els.relay.value.trim(),pass=els.passphrase.value;
   myName=claimUsername((els.username.value.trim()||"user").slice(0,24));
   els.username.value=myName;localStorage.setItem("v0rt3x_username",myName);
   if(!url||(!url.startsWith("wss://")&&!url.startsWith("ws://"))){addMessage({type:"system",text:"Enter a valid ws:// or wss:// URL."});return;}
   const unenc=!!window._forceUnencrypted||pass==="";
   if(!unenc&&(!pass||pass.length<4)){addMessage({type:"system",text:"Passphrase must be at least 4 characters."});return;}
   window._forceUnencrypted=false;
-  if(typeof normalizeRelayUrl==="function") url=normalizeRelayUrl(url);
-  els.relay.value=url;
   currentRoomKey=roomKeyFromUrl(url);els.connectBtn.disabled=true;setStatus("connecting…",false,false,false);
   online.clear();authed=false;
-  relayMode=detectN3xnUrl(url)?"n3xn":"classic";
-  if($("relayModeLine")) $("relayModeLine").textContent="relay: "+relayMode+" (handshaking)";
   const _start=key=>{
     aesKey=key;ws=new WebSocket(url);
-    ws.onopen=()=>{
-      if(relayMode==="n3xn" || detectN3xnUrl(url)){
-        // Announce timezone; worker also pushes SYS_INIT on accept
-        try{
-          ws.send(JSON.stringify({
-            opcode:"SYS_INIT",
-            payload:{ timezone: myTimezone, userAgent: navigator.userAgent, client:"V0RT3X" }
-          }));
-        }catch(_){}
-      }
-    };
     ws.onmessage=async ev=>{
       let data;try{data=JSON.parse(ev.data);}catch{return;}if(!data)return;
-      // n3xn opcode packets
-      if(data.opcode){
-        handleN3xnPacket(data);
-        return;
-      }
       if(data.t==="hello"){
-        relayMode="classic";
-        if($("relayModeLine")) $("relayModeLine").textContent="relay: classic";
-
         myIpId=data.ipId||null;mySid=data.sid||myId;
         els.myIdLine.textContent="join: "+myId;
         if(els.myDevLine) els.myDevLine.textContent="device: "+myDeviceHash;
@@ -2170,7 +1886,7 @@ function connect(){
       }
     };
     ws.onclose=()=>{
-      connected=false;authed=false;leaveVoice(true);aesKey=null;myIpId=null;myNetHash=null;myJoinHash=null;roomCreatorId=null;roomStarted=false;online.clear();relayMode="classic";if($("relayModeLine"))$("relayModeLine").textContent="relay: classic";try{updatePhaseUI();}catch(_){}
+      connected=false;authed=false;leaveVoice(true);aesKey=null;myIpId=null;roomCreatorId=null;roomStarted=false;online.clear();try{updatePhaseUI();}catch(_){}
       els.connectBtn.disabled=false;els.disconnectBtn.disabled=true;els.applySettingsBtn.disabled=true;els.applyAclBtn.disabled=true;
       els.loginGate.classList.remove("on");els.myIdLine.textContent="hash: —";applySettingsToUI();setStatus("disconnected",false,false,false);
       addMessage({type:"system",text:"Disconnected"});
