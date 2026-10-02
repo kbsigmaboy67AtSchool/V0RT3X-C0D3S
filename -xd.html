@@ -438,13 +438,15 @@
         <div class="id-line" id="myIdLine">join: —</div>
         <div class="id-line" id="myDevLine">device: —</div>
         <div class="id-line" id="myIpLine">net: —</div>
+        <div class="id-line" id="myTzLine">tz: —</div>
+        <div class="id-line" id="relayModeLine">relay: classic</div>
         <div class="id-line" id="roomPhaseLine">phase: lobby</div>
       </div>
       <div>
         <h2>Room = WSS Link</h2>
         <label for="relay">WebSocket URL</label>
         <input id="relay" placeholder="wss://relay.example/r/my-room" />
-        <p class="hint" style="margin-top:5px">Not saved. One IP-hash per room.</p>
+        <p class="hint" style="margin-top:5px">Classic DO room path, or n3xn <code>wss://…workers.dev/ws</code> (special branch). Auto-detects.</p>
       </div>
       <div>
         <h2>Encryption</h2>
@@ -654,6 +656,12 @@ let myDeviceHash=myDeviceRaw.slice(0,10);
 hashStr("v0rt3x-device|"+myDeviceRaw).then(h=>{ myDeviceHash=h; try{ if(typeof els!=="undefined"&&els.myDevLine) els.myDevLine.textContent="device: "+h; }catch(_){}});
 
 let roomStarted=false;
+let relayMode="classic"; // classic | n3xn
+let myNetHash=null;
+let myTimezone=(typeof Intl!=="undefined"&&Intl.DateTimeFormat)?(Intl.DateTimeFormat().resolvedOptions().timeZone||"UTC"):"UTC";
+let myJoinHash=null; // n3xn joinHash (same as myId when n3xn)
+const n3xnPending=new Map(); // id -> resolve for RPC
+
 const HOST_HIST_MAX=40;
 const HOST_IDB_KEY="v0rt3x_host_hist";
 
@@ -771,13 +779,14 @@ function updatePhaseUI(){
   if(els.bcastHistBtn) els.bcastHistBtn.disabled=!isAdmin()||!roomStarted;
 }
 
-function identityTags(deviceHash, ipId){
+function identityTags(deviceHash, ipId, netHash){
   let s="";
   if(deviceHash&&deviceHash===myDeviceHash) s+='<span class="tag same-dev">same device</span>';
-  if(ipId&&myIpId&&ipId===myIpId) s+='<span class="tag same-ip">same net</span>';
+  if((ipId&&myIpId&&ipId===myIpId) || (netHash&&myNetHash&&netHash===myNetHash))
+    s+='<span class="tag same-ip">same net</span>';
   return s;
 }
-;
+
 const MAX_FILE=1.5*1024*1024;
 let ws=null,aesKey=null,connected=false,authed=false;
 let myId=crypto.randomUUID().slice(0,8),myIpId=null,mySid=null;
@@ -1348,7 +1357,227 @@ function volumeLoop(){
   for(const[id,p]of peers){if(p.analyser){p.analyser.getByteFrequencyData(data);let s=0;for(let i=0;i<data.length;i++)s+=data[i];setPeerTalking(id,(s/data.length)/255);}}
   volRaf=requestAnimationFrame(volumeLoop);
 }
-function sendRaw(o){if(ws&&ws.readyState===1)ws.send(JSON.stringify(o));}
+function normalizeRelayUrl(url){
+  let u=String(url||"").trim();
+  if(!u) return u;
+  // n3xn workers often expose /ws — auto-append if bare workers.dev root
+  try{
+    const parsed=new URL(u.replace(/^ws/,"http"));
+    if((/workers\.dev$/i.test(parsed.hostname)||/n3xn/i.test(parsed.hostname)) && (parsed.pathname==="/"||parsed.pathname==="")){
+      parsed.pathname="/ws";
+      u=parsed.toString().replace(/^http/,"ws");
+    }
+  }catch(_){}
+  return u;
+}
+
+function detectN3xnUrl(url){
+  const s=String(url||"");
+  return /\/ws\/?$/i.test(s) || /n3xn/i.test(s) || /workers\.dev/i.test(s);
+}
+
+function n3xnSend(opcode, payload, id){
+  if(!ws||ws.readyState!==1) return null;
+  const packet={opcode, payload:payload||{}};
+  if(id) packet.id=id;
+  ws.send(JSON.stringify(packet));
+  return id;
+}
+
+function n3xnRpc(opcode, payload, timeoutMs){
+  return new Promise((resolve,reject)=>{
+    const id=(typeof crypto!=="undefined"&&crypto.randomUUID)?crypto.randomUUID():String(Date.now())+Math.random();
+    const to=setTimeout(()=>{ n3xnPending.delete(id); reject(new Error("n3xn rpc timeout "+opcode)); }, timeoutMs||8000);
+    n3xnPending.set(id, {resolve, reject, to});
+    n3xnSend(opcode, payload, id);
+  });
+}
+
+/** Classic V0RT3X JSON {t:...} OR n3xn {opcode,payload} */
+function sendRaw(o){
+  if(!ws||ws.readyState!==1) return;
+  if(relayMode==="n3xn"){
+    // Map chat envelope onto n3xn CHAT_* opcodes (requires worker chat patch)
+    const roomId=currentRoomKey||"default";
+    if(!o||!o.t){
+      n3xnSend("WSS_RELAY_MSG", { targetJoinHash:o&&o.to, message:o });
+      return;
+    }
+    if(o.t==="join"){
+      n3xnSend("CHAT_JOIN", {
+        roomId, u:o.u, deviceHash:o.deviceHash||myDeviceHash,
+        netHash:myNetHash, timezone:myTimezone, account:o.account||null
+      });
+      return;
+    }
+    if(o.t==="signal"){
+      // WebRTC signaling via n3xn RTC_* when possible
+      const kind=o.kind;
+      const target=o.to;
+      if(kind==="offer"&&o.payload){
+        n3xnSend("RTC_OFFER", { targetJoinHash:target, offer:o.payload });
+        // also mirror as CHAT for clients that only speak V0RT3X-over-CHAT
+        n3xnSend("CHAT_MSG", { roomId, message:o });
+        return;
+      }
+      if(kind==="answer"&&o.payload){
+        n3xnSend("RTC_ANSWER", { targetJoinHash:target, answer:o.payload });
+        n3xnSend("CHAT_MSG", { roomId, message:o });
+        return;
+      }
+      if(kind==="ice"&&o.payload){
+        n3xnSend("RTC_ICE", { targetJoinHash:target, candidate:o.payload });
+        n3xnSend("CHAT_MSG", { roomId, message:o });
+        return;
+      }
+    }
+    // Targeted PM / directed packet
+    if(o.to){
+      n3xnSend("WSS_RELAY_MSG", { targetJoinHash:o.to, message:o });
+      n3xnSend("CHAT_MSG", { roomId, message:o });
+      return;
+    }
+    // Room broadcast
+    n3xnSend("CHAT_MSG", { roomId, message:o });
+    return;
+  }
+  ws.send(JSON.stringify(o));
+}
+
+function applyN3xnIdentity(payload){
+  if(!payload) return;
+  relayMode="n3xn";
+  if(payload.joinHash){
+    myJoinHash=payload.joinHash;
+    myId=payload.joinHash; // stable session id from edge
+  }
+  if(payload.deviceHash){
+    myDeviceHash=payload.deviceHash;
+  }
+  if(payload.netHash){
+    myNetHash=payload.netHash;
+    myIpId=payload.netHash; // reuse UI field as net hash
+  }
+  if(payload.timezone) myTimezone=payload.timezone;
+  try{
+    if(els.myIdLine) els.myIdLine.textContent="join: "+(myId||"—");
+    if(els.myDevLine) els.myDevLine.textContent="device: "+(myDeviceHash||"—");
+    if(els.myIpLine) els.myIpLine.textContent="net: "+(myNetHash||"—");
+    if($("myTzLine")) $("myTzLine").textContent="tz: "+(myTimezone||"—");
+    if($("relayModeLine")) $("relayModeLine").textContent="relay: n3xn";
+  }catch(_){}
+}
+
+function handleN3xnPacket(packet){
+  if(!packet||typeof packet!=="object") return false;
+  if(!packet.opcode) return false;
+
+  // RPC responses
+  if(packet.id && n3xnPending.has(packet.id)){
+    const pending=n3xnPending.get(packet.id);
+    n3xnPending.delete(packet.id);
+    clearTimeout(pending.to);
+    pending.resolve(packet.payload);
+  }
+
+  if(packet.opcode==="SYS_INIT"){
+    applyN3xnIdentity(packet.payload||{});
+    // Treat as connected hello for classic flow
+    connected=true;
+    els.disconnectBtn.disabled=false;
+    els.applySettingsBtn.disabled=false;
+    els.applyAclBtn.disabled=false;
+    if($("saveRelayBtn"))$("saveRelayBtn").disabled=false;
+    if($("publishRoomBtn"))$("publishRoomBtn").disabled=false;
+    updatePhaseUI();
+    addMessage({type:"system",text:"n3xn relay · join "+myId+" · device "+(myDeviceHash||"").slice(0,8)+" · net "+(myNetHash||"").slice(0,8)});
+    setTimeout(()=>openLoginGate(),300);
+    return true;
+  }
+
+  if(packet.opcode==="CHAT_PEER"){
+    const pl=packet.payload||{};
+    if(pl.type==="join"&&pl.joinHash&&pl.joinHash!==myId){
+      online.set(pl.joinHash,{
+        u:pl.u||"?",
+        ipId:pl.netHash||null,
+        deviceHash:pl.deviceHash||null,
+        netHash:pl.netHash||null,
+        timezone:pl.timezone||null
+      });
+      addMessage({type:"system",text:(pl.u||"someone")+" joined (n3xn)"});
+      if(isAdmin()){
+        hostAnnounce("peer-joined");
+        sendRaw({t:"settings",id:myId,settings:roomSettings});
+        if(acl.enabled) sendRaw({t:"acl",id:myId,acl});
+      }
+    }
+    if(pl.type==="leave"&&pl.joinHash){
+      online.delete(pl.joinHash);
+      addMessage({type:"system",text:"peer left (n3xn)"});
+    }
+    if(pl.type==="roster"&&Array.isArray(pl.peers)){
+      for(const peer of pl.peers){
+        if(peer.joinHash&&peer.joinHash!==myId){
+          online.set(peer.joinHash,{
+            u:peer.u||"?",
+            ipId:peer.netHash||null,
+            deviceHash:peer.deviceHash||null,
+            netHash:peer.netHash||null
+          });
+        }
+      }
+    }
+    return true;
+  }
+
+  if(packet.opcode==="CHAT_MSG"){
+    const pl=packet.payload||{};
+    const msg=pl.message||pl;
+    // Inject as classic message into existing handler path
+    if(msg&&typeof msg==="object"){
+      if(!msg.id && pl.senderJoinHash) msg.id=pl.senderJoinHash;
+      // Re-enter classic handler by synthesizing
+      if(typeof window.__v0HandleClassic==="function"){
+        window.__v0HandleClassic(msg);
+      }
+    }
+    return true;
+  }
+
+  if(packet.opcode==="WSS_RELAY_MSG"){
+    const pl=packet.payload||{};
+    const msg=pl.message;
+    if(msg&&typeof msg==="object"){
+      if(!msg.id && pl.senderJoinHash) msg.id=pl.senderJoinHash;
+      if(typeof window.__v0HandleClassic==="function") window.__v0HandleClassic(msg);
+    }
+    return true;
+  }
+
+  // WebRTC signaling from n3xn transport
+  if(packet.opcode==="RTC_OFFER"||packet.opcode==="RTC_ANSWER"||packet.opcode==="RTC_ICE"){
+    const pl=packet.payload||{};
+    const from=pl.senderJoinHash||pl.from;
+    if(!from||from===myId) return true;
+    let kind="ice", payload=null;
+    if(packet.opcode==="RTC_OFFER"){ kind="offer"; payload=pl.offer; }
+    else if(packet.opcode==="RTC_ANSWER"){ kind="answer"; payload=pl.answer; }
+    else { kind="ice"; payload=pl.candidate; }
+    if(typeof handleSignal==="function"){
+      handleSignal({ id:from, to:myId, u:online.get(from)?.u, kind, payload });
+    }
+    return true;
+  }
+
+  if(packet.opcode==="ERROR"){
+    addMessage({type:"system",text:"n3xn error: "+((packet.payload&&packet.payload.error)||"unknown")});
+    return true;
+  }
+
+  return true; // consumed as n3xn packet even if unhandled opcode
+}
+
 
 function parseAclText(text){
   const accounts={};
@@ -1703,13 +1932,36 @@ function connect(){
   const unenc=!!window._forceUnencrypted||pass==="";
   if(!unenc&&(!pass||pass.length<4)){addMessage({type:"system",text:"Passphrase must be at least 4 characters."});return;}
   window._forceUnencrypted=false;
+  url=normalizeRelayUrl(url);
+  els.relay.value=url;
   currentRoomKey=roomKeyFromUrl(url);els.connectBtn.disabled=true;setStatus("connecting…",false,false,false);
   online.clear();authed=false;
+  relayMode=detectN3xnUrl(url)?"n3xn":"classic";
+  if($("relayModeLine")) $("relayModeLine").textContent="relay: "+relayMode+" (handshaking)";
   const _start=key=>{
     aesKey=key;ws=new WebSocket(url);
+    ws.onopen=()=>{
+      if(relayMode==="n3xn" || detectN3xnUrl(url)){
+        // Announce timezone; worker also pushes SYS_INIT on accept
+        try{
+          ws.send(JSON.stringify({
+            opcode:"SYS_INIT",
+            payload:{ timezone: myTimezone, userAgent: navigator.userAgent, client:"V0RT3X" }
+          }));
+        }catch(_){}
+      }
+    };
     ws.onmessage=async ev=>{
       let data;try{data=JSON.parse(ev.data);}catch{return;}if(!data)return;
+      // n3xn opcode packets
+      if(data.opcode){
+        handleN3xnPacket(data);
+        return;
+      }
       if(data.t==="hello"){
+        relayMode="classic";
+        if($("relayModeLine")) $("relayModeLine").textContent="relay: classic";
+
         myIpId=data.ipId||null;mySid=data.sid||myId;
         els.myIdLine.textContent="join: "+myId;
         if(els.myDevLine) els.myDevLine.textContent="device: "+myDeviceHash;
@@ -1886,7 +2138,7 @@ function connect(){
       }
     };
     ws.onclose=()=>{
-      connected=false;authed=false;leaveVoice(true);aesKey=null;myIpId=null;roomCreatorId=null;roomStarted=false;online.clear();try{updatePhaseUI();}catch(_){}
+      connected=false;authed=false;leaveVoice(true);aesKey=null;myIpId=null;myNetHash=null;myJoinHash=null;roomCreatorId=null;roomStarted=false;online.clear();relayMode="classic";if($("relayModeLine"))$("relayModeLine").textContent="relay: classic";try{updatePhaseUI();}catch(_){}
       els.connectBtn.disabled=false;els.disconnectBtn.disabled=true;els.applySettingsBtn.disabled=true;els.applyAclBtn.disabled=true;
       els.loginGate.classList.remove("on");els.myIdLine.textContent="hash: —";applySettingsToUI();setStatus("disconnected",false,false,false);
       addMessage({type:"system",text:"Disconnected"});
