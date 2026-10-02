@@ -306,6 +306,7 @@
   </style>
 </head>
 <body>
+<form id="v0auth" onsubmit="return false;" style="display:none" aria-hidden="true"></form>
 <!-- V0RT3X tab cloaker — standalone; reuse on other sites via tab-cloaker.js -->
 <script>
 (function () {
@@ -451,7 +452,7 @@
       <div>
         <h2>Encryption</h2>
         <label for="passphrase">Shared passphrase</label>
-        <input id="passphrase" type="password" placeholder="strong secret" autocomplete="off" />
+        <input id="passphrase" form="v0auth" type="password" placeholder="strong secret" autocomplete="off" />
       </div>
       <div class="row">
         <button class="btn" id="connectBtn">Connect</button>
@@ -568,7 +569,7 @@
     <label>WebSocket URL</label>
     <input id="ncRelay" placeholder="wss://…" />
     <label>Passphrase (if encrypted)</label>
-    <input id="ncPass" type="password" placeholder="empty only if unencrypted" />
+    <input id="ncPass" form="v0auth" type="password" placeholder="empty only if unencrypted" />
     <button class="btn" id="ncStartBtn" style="width:100%">Open in new tab</button>
     <button class="btn btn-danger" id="ncCancelBtn" style="width:100%">Cancel</button>
   </div></div>
@@ -603,7 +604,7 @@
     <label>Account username</label>
     <input id="loginUser" placeholder="username or blank for guest" />
     <label>Password</label>
-    <input id="loginPass" type="password" placeholder="password" autocomplete="off" />
+    <input id="loginPass" form="v0auth" type="password" placeholder="password" autocomplete="off" />
     <button class="btn" id="loginBtn" style="width:100%">Enter room</button>
     <button class="btn btn-danger" id="loginCancel" style="width:100%">Cancel</button>
   </div></div>
@@ -1491,6 +1492,8 @@ function handleN3xnPacket(packet){
     if($("publishRoomBtn"))$("publishRoomBtn").disabled=false;
     updatePhaseUI();
     addMessage({type:"system",text:"n3xn relay · join "+myId+" · device "+(myDeviceHash||"").slice(0,8)+" · net "+(myNetHash||"").slice(0,8)});
+    try{ n3xnSend("PUBLIC_SUBSCRIBE", {}); }catch(_){}
+    try{ n3xnSend("PUBLIC_LIST", {}); }catch(_){}
     setTimeout(()=>openLoginGate(),300);
     return true;
   }
@@ -1570,6 +1573,12 @@ function handleN3xnPacket(packet){
     return true;
   }
 
+  if(packet.opcode==="PUBLIC_LIST"){
+    const rooms=(packet.payload&&packet.payload.rooms)||[];
+    publicRooms=rooms;
+    try{renderPublicList();}catch(_){}
+    return true;
+  }
   if(packet.opcode==="ERROR"){
     addMessage({type:"system",text:"n3xn error: "+((packet.payload&&packet.payload.error)||"unknown")});
     return true;
@@ -1830,7 +1839,10 @@ function connectPublicDirectory(baseWs){
   const dir=directoryUrlFromRelay(baseWs);if(!dir)return;
   // already connected to same dir?
   if(publicDirWs&&publicDirWs.readyState===1&&publicDirWs._dir===dir){
-    publicDirWs.send(JSON.stringify({t:"public-sync"}));
+    try{publicDirWs.send(JSON.stringify({t:"public-subscribe"}));}catch(_){}
+    try{publicDirWs.send(JSON.stringify({t:"public-sync"}));}catch(_){}
+    try{publicDirWs.send(JSON.stringify({opcode:"PUBLIC_SUBSCRIBE",payload:{}}));}catch(_){}
+    try{publicDirWs.send(JSON.stringify({opcode:"PUBLIC_LIST",payload:{}}));}catch(_){}
     return;
   }
   try{if(publicDirWs)publicDirWs.close();}catch(_){}
@@ -1838,21 +1850,27 @@ function connectPublicDirectory(baseWs){
     publicDirWs=new WebSocket(dir);
     publicDirWs._dir=dir;
     publicDirWs.onopen=()=>{
-      publicDirWs.send(JSON.stringify({t:"public-sync"}));
+      try{publicDirWs.send(JSON.stringify({t:"public-subscribe"}));}catch(_){}
+    try{publicDirWs.send(JSON.stringify({t:"public-sync"}));}catch(_){}
+    try{publicDirWs.send(JSON.stringify({opcode:"PUBLIC_SUBSCRIBE",payload:{}}));}catch(_){}
+    try{publicDirWs.send(JSON.stringify({opcode:"PUBLIC_LIST",payload:{}}));}catch(_){}
       if($("refreshPublicBtn"))$("refreshPublicBtn").disabled=false;
       if($("publishRoomBtn"))$("publishRoomBtn").disabled=!connected;
       if($("unpublishRoomBtn"))$("unpublishRoomBtn").disabled=!publishedUrl;
     };
     publicDirWs.onmessage=ev=>{
       let d;try{d=JSON.parse(ev.data);}catch{return;}
-      if(d.t==="hello")return; // ignore room hello on directory
+      if(d.t==="hello"||d.opcode==="SYS_INIT")return;
+      if(d.opcode==="PUBLIC_LIST"&&d.payload&&Array.isArray(d.payload.rooms)){
+        publicRooms=d.payload.rooms;renderPublicList();return;
+      }
       if(d.t==="public-list"&&Array.isArray(d.rooms)){
-        publicRooms=d.rooms;renderPublicList();
+        publicRooms=d.rooms;renderPublicList();return;
       }
       if(d.t==="public-announce"&&d.room){
         const i=publicRooms.findIndex(x=>x.url===d.room.url);
         if(i>=0)publicRooms[i]=d.room;else publicRooms.push(d.room);
-        renderPublicList();
+        renderPublicList();return;
       }
       if(d.t==="public-unpublish"&&d.url){
         publicRooms=publicRooms.filter(r=>r.url!==d.url);
@@ -1884,6 +1902,7 @@ function publishCurrentRoom(){
     ts:Date.now(),
   };
   publicDirWs.send(JSON.stringify({t:"public-announce",room}));
+  try{publicDirWs.send(JSON.stringify({opcode:"PUBLIC_ANNOUNCE",payload:{room}}));}catch(_){}
   publishedUrl=room.url;
   const i=publicRooms.findIndex(x=>x.url===room.url);
   if(i>=0)publicRooms[i]=room;else publicRooms.push(room);
@@ -1917,7 +1936,19 @@ if($("ncStartBtn"))$("ncStartBtn").onclick=()=>{
 if($("openIdbBtn"))$("openIdbBtn").onclick=()=>{$("idbModal").classList.add("on");renderIdbList();};
 if($("idbCloseBtn"))$("idbCloseBtn").onclick=()=>$("idbModal").classList.remove("on");
 if($("idbSaveConvBtn"))$("idbSaveConvBtn").onclick=()=>saveCurrentConversation();
-if($("refreshPublicBtn"))$("refreshPublicBtn").onclick=()=>{if(publicDirWs&&publicDirWs.readyState===1)publicDirWs.send(JSON.stringify({t:"public-sync"}));else if(els.relay.value)connectPublicDirectory(els.relay.value);};
+if($("refreshPublicBtn"))$("refreshPublicBtn").onclick=()=>{
+  if(publicDirWs&&publicDirWs.readyState===1){
+    try{publicDirWs.send(JSON.stringify({t:"public-subscribe"}));}catch(_){}
+    try{publicDirWs.send(JSON.stringify({t:"public-sync"}));}catch(_){}
+    try{publicDirWs.send(JSON.stringify({opcode:"PUBLIC_SUBSCRIBE",payload:{}}));}catch(_){}
+    try{publicDirWs.send(JSON.stringify({opcode:"PUBLIC_LIST",payload:{}}));}catch(_){}
+  } else if(els.relay.value){
+    connectPublicDirectory(els.relay.value);
+  }
+  if(relayMode==="n3xn"&&ws&&ws.readyState===1){
+    try{n3xnSend("PUBLIC_LIST",{});}catch(_){}
+  }
+};
 if($("publishRoomBtn"))$("publishRoomBtn").onclick=()=>publishCurrentRoom();
 if($("unpublishRoomBtn"))$("unpublishRoomBtn").onclick=()=>unpublishCurrentRoom();
 renderSavedRelays();renderTabBar();
@@ -1925,14 +1956,15 @@ renderSavedRelays();renderTabBar();
 function connect(){
   myId=(typeof uuid==="function"?uuid():Math.random().toString(16).slice(2)).replace(/-/g,"").slice(0,8);
 
-  const url=els.relay.value.trim(),pass=els.passphrase.value;
+  let url=els.relay.value.trim();
+  const pass=els.passphrase.value;
   myName=claimUsername((els.username.value.trim()||"user").slice(0,24));
   els.username.value=myName;localStorage.setItem("v0rt3x_username",myName);
   if(!url||(!url.startsWith("wss://")&&!url.startsWith("ws://"))){addMessage({type:"system",text:"Enter a valid ws:// or wss:// URL."});return;}
   const unenc=!!window._forceUnencrypted||pass==="";
   if(!unenc&&(!pass||pass.length<4)){addMessage({type:"system",text:"Passphrase must be at least 4 characters."});return;}
   window._forceUnencrypted=false;
-  url=normalizeRelayUrl(url);
+  if(typeof normalizeRelayUrl==="function") url=normalizeRelayUrl(url);
   els.relay.value=url;
   currentRoomKey=roomKeyFromUrl(url);els.connectBtn.disabled=true;setStatus("connecting…",false,false,false);
   online.clear();authed=false;
