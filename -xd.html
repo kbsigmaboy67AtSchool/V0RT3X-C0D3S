@@ -270,98 +270,116 @@
     #monacoHost{display:none;flex:1;height:160px;border:2px solid #333;border-radius:var(--radius);overflow:hidden}
     #monacoHost.on{display:block}
     #msgInput.html-hidden{display:none}
-    ./* ChromeOS-inspired emoji picker */
-    .emoji-panel{
-      display:none;
-      position:fixed;
-      z-index:200;
-      width:min(360px, calc(100vw - 24px));
-      height:380px;
+    ./* ChromeOS-style floating emoji window */
+    #emojiPanel.emoji-panel, .emoji-panel{
+      display:none !important;
+      position:fixed !important;
+      z-index:10000 !important;
+      left:0; top:0;
+      width:340px;
+      height:420px;
+      max-width:calc(100vw - 16px);
+      max-height:calc(100vh - 16px);
+      margin:0;
+      padding:0;
+      box-sizing:border-box;
       flex-direction:column;
-      background:#2d2e30;
-      border:1px solid #5f6368;
-      border-radius:16px;
-      box-shadow:0 8px 28px rgba(0,0,0,.45);
+      background:#31333a;
+      border:1px solid rgba(255,255,255,.12);
+      border-radius:12px;
+      box-shadow:0 12px 40px rgba(0,0,0,.55), 0 0 0 1px rgba(0,0,0,.2);
       overflow:hidden;
-      font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
-      color:#e8eaed;
+      font-family:Roboto,system-ui,"Segoe UI",sans-serif;
+      color:#e3e3e3;
+      pointer-events:auto;
     }
-    .emoji-panel.on{display:flex}
+    #emojiPanel.emoji-panel.on, .emoji-panel.on{
+      display:flex !important;
+    }
+    .emoji-panel .ep-titlebar{
+      display:flex;align-items:center;justify-content:space-between;
+      padding:10px 12px 6px;flex-shrink:0;
+      cursor:default;user-select:none;
+      background:linear-gradient(180deg,#3a3d45 0%,#31333a 100%);
+    }
+    .emoji-panel .ep-titlebar .ep-title{
+      font-size:13px;font-weight:500;color:#e8eaed;letter-spacing:.2px;
+    }
+    .emoji-panel .ep-titlebar .ep-close{
+      width:28px;height:28px;border:none;border-radius:50%;
+      background:transparent;color:#9aa0a6;font-size:18px;line-height:1;
+      cursor:pointer;display:flex;align-items:center;justify-content:center;
+    }
+    .emoji-panel .ep-titlebar .ep-close:hover{background:rgba(255,255,255,.1);color:#fff}
     .emoji-panel .ep-head{
       display:flex;flex-direction:column;gap:8px;
-      padding:12px 12px 8px;
-      background:#2d2e30;
-      border-bottom:1px solid #3c4043;
-    }
-    .emoji-panel .ep-title{
-      font-size:13px;font-weight:500;color:#e8eaed;letter-spacing:.2px;
+      padding:0 12px 8px;flex-shrink:0;
     }
     .emoji-panel .ep-search{
       width:100%;box-sizing:border-box;
-      padding:9px 12px 9px 36px;
-      border-radius:20px;
-      border:none;
-      background:#3c4043 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='%239aa0a6'%3E%3Cpath d='M15.5 14h-.79l-.28-.27A6.47 6.47 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z'/%3E%3C/svg%3E") no-repeat 10px center;
-      color:#e8eaed;
-      font-size:13px;
-      outline:none;
+      padding:10px 12px 10px 36px;
+      border-radius:24px;border:none;
+      background:#1f1f1f url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='%239aa0a6'%3E%3Cpath d='M15.5 14h-.79l-.28-.27A6.47 6.47 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z'/%3E%3C/svg%3E") no-repeat 12px center;
+      color:#e8eaed;font-size:13px;outline:none;
     }
-    .emoji-panel .ep-search:focus{background-color:#4a4d51;box-shadow:0 0 0 2px #8ab4f8}
+    .emoji-panel .ep-search:focus{box-shadow:0 0 0 2px #a8c7fa}
     .emoji-panel .ep-search::placeholder{color:#9aa0a6}
     .emoji-panel .ep-custom{display:flex;gap:6px}
     .emoji-panel .ep-custom input{
-      flex:1;padding:7px 10px;border-radius:12px;border:1px solid #5f6368;
-      background:#3c4043;color:#e8eaed;font-size:12px;outline:none;
+      flex:1;min-width:0;padding:7px 10px;border-radius:16px;border:1px solid #5f6368;
+      background:#1f1f1f;color:#e8eaed;font-size:12px;outline:none;
     }
     .emoji-panel .ep-custom button{
-      padding:7px 12px;border-radius:12px;border:none;
-      background:#8ab4f8;color:#202124;font-weight:600;font-size:12px;cursor:pointer;
+      padding:7px 12px;border-radius:16px;border:none;
+      background:#a8c7fa;color:#062e6f;font-weight:600;font-size:12px;cursor:pointer;
     }
-    .emoji-panel .ep-custom button:hover{filter:brightness(1.08)}
-    .emoji-panel .ep-status{
-      font-size:11px;color:#9aa0a6;padding:0 12px 6px;
-    }
+    .emoji-panel .ep-status{font-size:11px;color:#9aa0a6;padding:0 12px 4px;flex-shrink:0}
     .emoji-panel .ep-mode{
-      display:none;
-      font-size:11px;color:#8ab4f8;padding:0 12px 6px;
+      display:none;font-size:11px;color:#a8c7fa;padding:0 12px 6px;flex-shrink:0;
     }
     .emoji-panel .ep-mode.on{display:block}
     .emoji-panel .ep-grid{
-      flex:1;overflow-y:auto;overflow-x:hidden;
+      flex:1 1 auto;min-height:0;
+      overflow-y:auto;overflow-x:hidden;
       display:grid;
-      grid-template-columns:repeat(9, 1fr);
-      gap:0;
-      padding:4px 8px 8px;
+      grid-template-columns:repeat(8, 1fr);
+      gap:2px;
+      padding:4px 10px 10px;
       align-content:start;
-      min-height:0;
+      scrollbar-width:thin;
+      scrollbar-color:#747775 transparent;
     }
     .emoji-panel .ep-grid button{
       background:transparent;border:none;
       font-size:22px;line-height:1;
       width:100%;aspect-ratio:1;
-      border-radius:8px;cursor:pointer;
-      padding:0;display:flex;align-items:center;justify-content:center;
+      border-radius:8px;cursor:pointer;padding:0;
+      display:flex;align-items:center;justify-content:center;
       font-family:"Noto Color Emoji","Apple Color Emoji","Segoe UI Emoji",sans-serif;
     }
-    .emoji-panel .ep-grid button:hover{background:rgba(232,234,237,.12)}
-    .emoji-panel .ep-grid button:active{background:rgba(138,180,248,.25)}
+    .emoji-panel .ep-grid button:hover{background:rgba(232,234,237,.1)}
+    .emoji-panel .ep-grid button:focus{outline:2px solid #a8c7fa;outline-offset:-2px}
     .emoji-panel .ep-section{
       grid-column:1 / -1;
-      font-size:11px;font-weight:500;color:#9aa0a6;
-      padding:8px 4px 4px;text-transform:none;
+      font-size:12px;font-weight:500;color:#c4c7c5;
+      padding:10px 4px 6px;
     }
     .emoji-panel .ep-cats{
-      display:flex;border-top:1px solid #3c4043;
-      background:#292a2d;padding:4px 6px;gap:2px;flex-shrink:0;
+      display:flex;flex-shrink:0;
+      border-top:1px solid rgba(255,255,255,.08);
+      background:#292a2d;padding:6px 4px;gap:0;
     }
     .emoji-panel .ep-cats button{
       flex:1;border:none;background:transparent;color:#9aa0a6;
-      font-size:18px;padding:8px 0;border-radius:10px;cursor:pointer;
-      line-height:1;
+      font-size:17px;padding:8px 0;border-radius:10px;cursor:pointer;line-height:1;
       font-family:"Noto Color Emoji","Apple Color Emoji","Segoe UI Emoji",sans-serif;
     }
-    .emoji-panel .ep-cats button:hover{background:rgba(232,234,237,.08);color:#e8eaed}
-    .emoji-panel .ep-cats button.on{background:rgba(138,180,248,.2);color:#e8eaed}
+    .emoji-panel .ep-cats button:hover{background:rgba(255,255,255,.06);color:#e8eaed}
+    .emoji-panel .ep-cats button.on{
+      background:rgba(168,199,250,.18);color:#e8eaed;
+      box-shadow:inset 0 -2px 0 #a8c7fa;
+    }
+
 
     .emoji-panel button:hover{background:#222}
     .msg .html-frame{width:100%;min-height:120px;max-height:360px;border:1px solid #333;border-radius:10px;background:#0a0a0a;margin-top:6px}
@@ -3719,22 +3737,85 @@ function insertEmojiChar(em){
   }
 }
 
+function getCaretScreenPos(){
+  // Prefer focused textarea/input caret; fall back to emoji button / composer
+  const el=document.activeElement;
+  if(el && (el.tagName==="TEXTAREA" || el.tagName==="INPUT") && typeof el.selectionStart==="number"){
+    try{
+      const rect=el.getBoundingClientRect();
+      // mirror technique for caret X/Y
+      const div=document.createElement("div");
+      const style=window.getComputedStyle(el);
+      const props=["boxSizing","width","height","overflowX","overflowY","borderTopWidth","borderRightWidth","borderBottomWidth","borderLeftWidth","paddingTop","paddingRight","paddingBottom","paddingLeft","fontStyle","fontVariant","fontWeight","fontStretch","fontSize","fontSizeAdjust","lineHeight","fontFamily","textAlign","textTransform","textIndent","letterSpacing","wordSpacing","whiteSpace","wordBreak","wordWrap"];
+      div.style.position="absolute";
+      div.style.visibility="hidden";
+      div.style.whiteSpace="pre-wrap";
+      div.style.top="0"; div.style.left="-9999px";
+      for(const p of props){ try{ div.style[p]=style[p]; }catch(_){} }
+      div.style.width=rect.width+"px";
+      const text=el.value.substring(0, el.selectionStart);
+      div.textContent=text;
+      const span=document.createElement("span");
+      span.textContent=el.value.substring(el.selectionStart) || ".";
+      div.appendChild(span);
+      document.body.appendChild(div);
+      const spanRect=span.getBoundingClientRect();
+      const divRect=div.getBoundingClientRect();
+      // span position relative to mirror → map to textarea
+      const caretX=rect.left + (spanRect.left - divRect.left) - el.scrollLeft;
+      const caretY=rect.top + (spanRect.top - divRect.top) - el.scrollTop;
+      document.body.removeChild(div);
+      return {
+        x: Math.max(8, Math.min(caretX, window.innerWidth-8)),
+        y: Math.max(8, Math.min(caretY, window.innerHeight-8)),
+        inputRect: rect
+      };
+    }catch(e){
+      const rect=el.getBoundingClientRect();
+      return { x:rect.left+24, y:rect.top, inputRect:rect };
+    }
+  }
+  // Monaco
+  try{
+    if(typeof monacoEditor!=="undefined" && monacoEditor && typeof htmlMode!=="undefined" && htmlMode){
+      const pos=monacoEditor.getPosition();
+      const coords=monacoEditor.getScrolledVisiblePosition(pos);
+      const dom=monacoEditor.getDomNode();
+      if(dom && coords){
+        const r=dom.getBoundingClientRect();
+        return { x:r.left+coords.left, y:r.top+coords.top, inputRect:r };
+      }
+    }
+  }catch(_){}
+  const anchor=els.msgInput || els.emojiBtn || document.body;
+  const r=anchor.getBoundingClientRect ? anchor.getBoundingClientRect() : {left:40,top:window.innerHeight-120,width:200,height:40};
+  return { x:r.left+20, y:r.top, inputRect:r };
+}
+
 function positionEmojiPanel(){
   const panel=els.emojiPanel; if(!panel) return;
-  const anchor=els.emojiBtn || document.body;
-  const r=anchor.getBoundingClientRect ? anchor.getBoundingClientRect() : {left:12,bottom:80,top:0};
-  const pw=Math.min(360, window.innerWidth-24);
-  const ph=380;
-  let left=r.left;
-  if(left+pw > window.innerWidth-12) left=window.innerWidth-pw-12;
-  if(left<12) left=12;
-  // prefer above the button
-  let top=r.top - ph - 8;
-  if(top<12) top=Math.min(window.innerHeight-ph-12, r.bottom+8);
+  const pw=Math.min(340, window.innerWidth-16);
+  const ph=Math.min(420, window.innerHeight-16);
+  panel.style.width=pw+"px";
+  panel.style.height=ph+"px";
+  const caret=getCaretScreenPos();
+  // Prefer ABOVE the caret (ChromeOS-style near typing)
+  let left=caret.x - 40;
+  let top=caret.y - ph - 12;
+  // If not enough room above, place below input
+  if(top < 8){
+    const ir=caret.inputRect || {bottom:caret.y+20};
+    top=(ir.bottom || caret.y+20) + 10;
+  }
+  if(top + ph > window.innerHeight - 8){
+    top=Math.max(8, window.innerHeight - ph - 8);
+  }
+  if(left + pw > window.innerWidth - 8) left=window.innerWidth - pw - 8;
+  if(left < 8) left=8;
   panel.style.left=left+"px";
   panel.style.top=top+"px";
-  panel.style.bottom="auto";
   panel.style.right="auto";
+  panel.style.bottom="auto";
 }
 
 function closeEmojiPanel(){
@@ -3746,22 +3827,30 @@ function closeEmojiPanel(){
 function openEmojiPanel(mode, mid){
   emojiPickerMode=mode||"insert";
   emojiReactMid=mid||null;
-  // ensure panel is on body so it never pushes chat layout
-  if(els.emojiPanel && els.emojiPanel.parentElement!==document.body){
+  // Floating window lives on body (separate from chat layout)
+  if(!els.emojiPanel){
+    const p=document.createElement("div");
+    p.id="emojiPanel"; p.className="emoji-panel";
+    document.body.appendChild(p);
+    els.emojiPanel=p;
+  } else if(els.emojiPanel.parentElement!==document.body){
     document.body.appendChild(els.emojiPanel);
   }
   buildEmojiPanel(true);
-  if(els.emojiPanel){
-    els.emojiPanel.classList.add("on");
-    positionEmojiPanel();
-  }
-  // kick full pack load (never blocked by quick set)
+  els.emojiPanel.classList.add("on");
+  positionEmojiPanel();
+  // Focus search like ChromeOS
+  setTimeout(()=>{
+    const s=els.emojiPanel.querySelector(".ep-search");
+    if(s) try{ s.focus(); s.select(); }catch(_){}
+  }, 30);
   ensureEmojiPack().then(()=>{
+    if(!els.emojiPanel || !els.emojiPanel.classList.contains("on")) return;
     renderEmojiCats();
     renderEmojiGrid();
-    const st=els.emojiPanel && els.emojiPanel.querySelector(".ep-status");
+    const st=els.emojiPanel.querySelector(".ep-status");
     if(st) st.textContent=emojiPackFull ? (emojiPack.length+" emojis") : "Quick set";
-  });
+  }).catch(()=>{});
 }
 
 function buildEmojiPanel(force){
@@ -3774,11 +3863,20 @@ function buildEmojiPanel(force){
   panel.innerHTML="";
   panel.dataset.ui="cros";
 
-  const head=document.createElement("div");
-  head.className="ep-head";
+  const titlebar=document.createElement("div");
+  titlebar.className="ep-titlebar";
   const title=document.createElement("div");
   title.className="ep-title";
   title.textContent="Emoji";
+  const closeBtn=document.createElement("button");
+  closeBtn.type="button"; closeBtn.className="ep-close"; closeBtn.setAttribute("aria-label","Close");
+  closeBtn.innerHTML="&times;";
+  closeBtn.onclick=(e)=>{ e.stopPropagation(); closeEmojiPanel(); };
+  titlebar.appendChild(title); titlebar.appendChild(closeBtn);
+  panel.appendChild(titlebar);
+
+  const head=document.createElement("div");
+  head.className="ep-head";
   const search=document.createElement("input");
   search.className="ep-search";
   search.type="search";
@@ -3810,7 +3908,6 @@ function buildEmojiPanel(force){
   custom.appendChild(customIn);
   custom.appendChild(customBtn);
 
-  head.appendChild(title);
   head.appendChild(search);
   head.appendChild(custom);
   panel.appendChild(head);
@@ -4007,6 +4104,28 @@ if(els.emojiBtn){
       openEmojiPanel("insert", null);
     }
   };
+}
+// ChromeOS-like shortcuts: Ctrl+.  Meta+.  Ctrl+Shift+Space
+if(!window.__v0EmojiShortcut){
+  window.__v0EmojiShortcut=true;
+  document.addEventListener("keydown", (e)=>{
+    const isDot=(e.key==="."||e.code==="Period");
+    const shortcut=
+      ((e.ctrlKey||e.metaKey) && isDot && !e.altKey) ||
+      ((e.ctrlKey||e.metaKey) && e.shiftKey && (e.code==="Space"||e.key===" "));
+    if(!shortcut) return;
+    // only when typing in chat / focused composer
+    const ae=document.activeElement;
+    const inComposer=ae && (ae===els.msgInput || ae.id==="msgInput" || (els.emojiPanel && els.emojiPanel.contains(ae)) || (ae.closest && ae.closest("#monacoHost")));
+    if(!inComposer && ae && ae.tagName!=="TEXTAREA" && ae.tagName!=="INPUT") return;
+    e.preventDefault();
+    e.stopPropagation();
+    if(els.emojiPanel && els.emojiPanel.classList.contains("on")) closeEmojiPanel();
+    else openEmojiPanel("insert", null);
+  }, true);
+  window.addEventListener("resize", ()=>{
+    if(els.emojiPanel && els.emojiPanel.classList.contains("on")) positionEmojiPanel();
+  });
 }
 document.addEventListener("click",e=>{
   if(!els.emojiPanel||!els.emojiPanel.classList.contains("on")) return;
