@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -270,139 +269,148 @@
     #monacoHost{display:none;flex:1;height:160px;border:2px solid #333;border-radius:var(--radius);overflow:hidden}
     #monacoHost.on{display:block}
     #msgInput.html-hidden{display:none}
-    ./* V0RT3X emoji + memes floating modal (viewport-fixed, not sidebar) */
-    #v0EmojiModal{
-      display:none;
-      position:fixed;
-      left:50%;
-      top:50%;
-      transform:translate(-50%,-50%);
-      z-index:2147483000;
-      width:min(380px, calc(100vw - 24px));
-      height:min(460px, calc(100vh - 24px));
-      margin:0; padding:0;
-      box-sizing:border-box;
-      flex-direction:column;
-      background:#31333a;
-      border:1px solid rgba(255,255,255,.14);
-      border-radius:14px;
-      box-shadow:0 16px 48px rgba(0,0,0,.6);
-      overflow:hidden;
-      font-family:Roboto,system-ui,"Segoe UI",sans-serif;
-      color:#e3e3e3;
-      isolation:isolate;
-      contain:layout style;
-    }
-    #v0EmojiModal.on{display:flex}
-    #v0EmojiModal.anchored{
-      left:0; top:0;
-      transform:none;
-    }
+    ./* V0RT3X emoji/meme MODAL — always centered viewport dialog */
     #v0EmojiBackdrop{
-      display:none;
-      position:fixed; inset:0;
-      z-index:2147482999;
-      background:rgba(0,0,0,.35);
+      display:none !important;
+      position:fixed !important;
+      inset:0 !important;
+      z-index:2147482990 !important;
+      background:rgba(0,0,0,.45) !important;
+      margin:0 !important; padding:0 !important;
+      border:none !important;
     }
-    #v0EmojiBackdrop.on{display:block}
+    #v0EmojiBackdrop.on{ display:block !important; }
+    #v0EmojiModal{
+      display:none !important;
+      position:fixed !important;
+      left:50% !important;
+      top:50% !important;
+      right:auto !important;
+      bottom:auto !important;
+      transform:translate(-50%,-50%) !important;
+      z-index:2147483000 !important;
+      width:min(400px, calc(100vw - 32px)) !important;
+      height:min(480px, calc(100vh - 32px)) !important;
+      max-width:none !important;
+      max-height:none !important;
+      margin:0 !important;
+      padding:0 !important;
+      box-sizing:border-box !important;
+      flex-direction:column !important;
+      background:#31333a !important;
+      border:1px solid rgba(255,255,255,.14) !important;
+      border-radius:14px !important;
+      box-shadow:0 20px 60px rgba(0,0,0,.65) !important;
+      overflow:hidden !important;
+      font-family:Roboto,system-ui,"Segoe UI",sans-serif !important;
+      color:#e3e3e3 !important;
+      /* kill any parent/sidebar influence */
+      float:none !important;
+      inset:auto !important;
+    }
+    #v0EmojiModal.on{ display:flex !important; }
     #v0EmojiModal .ep-titlebar{
-      display:flex;align-items:center;justify-content:space-between;
-      padding:10px 12px;flex:0 0 auto;
-      background:#3a3d45;cursor:move;user-select:none;
+      display:flex; align-items:center; justify-content:space-between;
+      flex:0 0 44px; height:44px; box-sizing:border-box;
+      padding:0 8px 0 14px;
+      background:#3a3d45; user-select:none;
     }
-    #v0EmojiModal .ep-title{font-size:13px;font-weight:500}
+    #v0EmojiModal .ep-title{ font-size:14px; font-weight:500; }
     #v0EmojiModal .ep-close{
-      width:30px;height:30px;border:none;border-radius:50%;
-      background:transparent;color:#9aa0a6;font-size:20px;cursor:pointer;
+      width:36px; height:36px; border:none; border-radius:50%;
+      background:transparent; color:#c4c7c5; font-size:22px; line-height:1;
+      cursor:pointer; display:flex; align-items:center; justify-content:center;
     }
-    #v0EmojiModal .ep-close:hover{background:rgba(255,255,255,.1);color:#fff}
+    #v0EmojiModal .ep-close:hover{ background:rgba(255,255,255,.12); color:#fff; }
     #v0EmojiModal .ep-head{
-      display:flex;flex-direction:column;gap:8px;
-      padding:0 12px 8px;flex:0 0 auto;
+      display:flex; flex-direction:column; gap:8px;
+      flex:0 0 auto; padding:8px 12px 6px;
     }
     #v0EmojiModal .ep-search{
-      width:100%;box-sizing:border-box;
-      padding:10px 12px 10px 36px;border-radius:24px;border:none;
+      width:100%; box-sizing:border-box;
+      padding:10px 12px 10px 36px; border-radius:24px; border:none;
       background:#1f1f1f url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='%239aa0a6'%3E%3Cpath d='M15.5 14h-.79l-.28-.27A6.47 6.47 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z'/%3E%3C/svg%3E") no-repeat 12px center;
-      color:#e8eaed;font-size:13px;outline:none;
+      color:#e8eaed; font-size:13px; outline:none;
     }
-    #v0EmojiModal .ep-search:focus{box-shadow:0 0 0 2px #a8c7fa}
-    #v0EmojiModal .ep-custom{display:flex;gap:6px}
+    #v0EmojiModal .ep-custom{ display:flex; gap:6px; }
     #v0EmojiModal .ep-custom input{
-      flex:1;min-width:0;padding:7px 10px;border-radius:16px;border:1px solid #5f6368;
-      background:#1f1f1f;color:#e8eaed;font-size:12px;
+      flex:1; min-width:0; padding:7px 10px; border-radius:16px;
+      border:1px solid #5f6368; background:#1f1f1f; color:#e8eaed; font-size:12px;
     }
     #v0EmojiModal .ep-custom button{
-      padding:7px 12px;border-radius:16px;border:none;
-      background:#a8c7fa;color:#062e6f;font-weight:600;font-size:12px;cursor:pointer;
+      padding:7px 12px; border-radius:16px; border:none;
+      background:#a8c7fa; color:#062e6f; font-weight:600; font-size:12px; cursor:pointer;
     }
-    #v0EmojiModal .ep-status{font-size:11px;color:#9aa0a6;padding:0 12px 4px;flex:0 0 auto}
-    #v0EmojiModal .ep-mode{display:none;font-size:11px;color:#a8c7fa;padding:0 12px 6px;flex:0 0 auto}
-    #v0EmojiModal .ep-mode.on{display:block}
-    /* CRITICAL: height:0 + flex:1 enables scrolling inside fixed modal */
+    #v0EmojiModal .ep-status{
+      flex:0 0 auto; font-size:11px; color:#9aa0a6; padding:2px 12px 6px;
+    }
+    #v0EmojiModal .ep-mode{ display:none; font-size:11px; color:#a8c7fa; padding:0 12px 6px; }
+    #v0EmojiModal .ep-mode.on{ display:block; }
+    /* Fixed scroll region — explicit height so emojis always have room */
     #v0EmojiModal .ep-grid{
-      flex:1 1 auto;
-      height:0;
-      min-height:0;
-      overflow-x:hidden;
-      overflow-y:scroll;
+      flex:1 1 auto !important;
+      height:auto !important;
+      min-height:220px !important;
+      max-height:none !important;
+      overflow-x:hidden !important;
+      overflow-y:auto !important;
       -webkit-overflow-scrolling:touch;
       overscroll-behavior:contain;
-      display:grid;
-      grid-template-columns:repeat(8, 1fr);
+      display:grid !important;
+      grid-template-columns:repeat(8, minmax(0, 1fr));
       gap:2px;
       padding:4px 10px 12px;
       align-content:start;
-      scrollbar-width:thin;
-      scrollbar-color:#888 transparent;
+      align-self:stretch;
     }
     #v0EmojiModal .ep-grid.memes-mode{
-      grid-template-columns:repeat(2, 1fr);
+      grid-template-columns:repeat(2, minmax(0, 1fr));
       gap:8px;
     }
     #v0EmojiModal .ep-grid button.ep-emoji{
-      background:transparent;border:none;
-      font-size:22px;line-height:1;
-      width:100%;aspect-ratio:1;
-      border-radius:8px;cursor:pointer;padding:0;
-      display:flex;align-items:center;justify-content:center;
+      background:transparent; border:none;
+      font-size:24px; line-height:1;
+      width:100%; aspect-ratio:1;
+      border-radius:8px; cursor:pointer; padding:0;
+      display:flex; align-items:center; justify-content:center;
       font-family:"Noto Color Emoji","Apple Color Emoji","Segoe UI Emoji",sans-serif;
     }
-    #v0EmojiModal .ep-grid button.ep-emoji:hover{background:rgba(255,255,255,.1)}
+    #v0EmojiModal .ep-grid button.ep-emoji:hover{ background:rgba(255,255,255,.1); }
     #v0EmojiModal .ep-meme{
-      display:flex;flex-direction:column;gap:4px;
-      background:#1f1f1f;border:1px solid #444;border-radius:10px;
-      overflow:hidden;cursor:pointer;padding:0;text-align:left;color:#e8eaed;
+      display:flex; flex-direction:column; gap:4px;
+      background:#1f1f1f; border:1px solid #444; border-radius:10px;
+      overflow:hidden; cursor:pointer; padding:0; text-align:left; color:#e8eaed;
     }
-    #v0EmojiModal .ep-meme:hover{border-color:#a8c7fa}
+    #v0EmojiModal .ep-meme:hover{ border-color:#a8c7fa; }
     #v0EmojiModal .ep-meme img{
-      width:100%;height:110px;object-fit:cover;background:#111;display:block;
+      width:100%; height:100px; object-fit:cover; background:#111; display:block;
     }
     #v0EmojiModal .ep-meme .ep-meme-title{
-      font-size:11px;padding:4px 6px 6px;line-height:1.25;
-      max-height:2.5em;overflow:hidden;
+      font-size:11px; padding:4px 6px 6px; line-height:1.25;
+      max-height:2.5em; overflow:hidden;
     }
     #v0EmojiModal .ep-section{
       grid-column:1 / -1;
-      font-size:12px;font-weight:500;color:#c4c7c5;
-      padding:10px 4px 6px;
+      font-size:12px; font-weight:500; color:#c4c7c5;
+      padding:8px 4px 4px;
     }
     #v0EmojiModal .ep-cats{
-      display:flex;flex:0 0 auto;
+      display:flex; flex:0 0 52px; height:52px; box-sizing:border-box;
       border-top:1px solid rgba(255,255,255,.08);
-      background:#292a2d;padding:6px 4px;gap:0;
+      background:#292a2d; padding:6px 4px; gap:0;
       overflow-x:auto;
     }
     #v0EmojiModal .ep-cats button{
-      flex:1;min-width:32px;border:none;background:transparent;color:#9aa0a6;
-      font-size:16px;padding:8px 4px;border-radius:10px;cursor:pointer;line-height:1;
+      flex:1; min-width:30px; border:none; background:transparent; color:#9aa0a6;
+      font-size:16px; padding:6px 2px; border-radius:10px; cursor:pointer; line-height:1;
       font-family:"Noto Color Emoji","Apple Color Emoji","Segoe UI Emoji",sans-serif;
     }
-    #v0EmojiModal .ep-cats button:hover{background:rgba(255,255,255,.06);color:#e8eaed}
+    #v0EmojiModal .ep-cats button:hover{ background:rgba(255,255,255,.06); color:#e8eaed; }
     #v0EmojiModal .ep-cats button.on{
-      background:rgba(168,199,250,.18);color:#e8eaed;
+      background:rgba(168,199,250,.18); color:#e8eaed;
       box-shadow:inset 0 -2px 0 #a8c7fa;
     }
+
 
 
 
@@ -3744,26 +3752,25 @@ function insertEmojiChar(em){
   pushEmojiRecent(em);
   if(emojiPickerMode==="react" && emojiReactMid){
     toggleReaction(emojiReactMid, em);
-    closeEmojiPanel();
-    try{ els.msgMenu && els.msgMenu.classList.remove("on"); }catch(_){}
+    // keep picker open so user can multi-react / switch messages
     return;
   }
   if(typeof htmlMode!=="undefined" && htmlMode && typeof monacoEditor!=="undefined" && monacoEditor){
     try{
       const sel=monacoEditor.getSelection();
       monacoEditor.executeEdits("",[{ range:sel, text:em, forceMoveMarkers:true }]);
-      monacoEditor.focus();
     }catch(_){}
   } else if(els.msgInput){
     const ta=els.msgInput;
-    const start=ta.selectionStart||0, end=ta.selectionEnd||0;
+    const a=ta.selectionStart||0, b=ta.selectionEnd||0;
     const val=ta.value||"";
-    ta.value=val.slice(0,start)+em+val.slice(end);
-    ta.selectionStart=ta.selectionEnd=start+em.length;
-    ta.focus();
+    ta.value=val.slice(0,a)+em+val.slice(b);
+    ta.selectionStart=ta.selectionEnd=a+em.length;
     try{ ta.dispatchEvent(new Event("input",{bubbles:true})); }catch(_){}
   }
+  // stay open — do not close, do not steal focus from search
 }
+
 
 
 async function loadMemes(force){
@@ -3824,23 +3831,19 @@ async function loadMemes(force){
 
 function sendMemeLink(meme){
   if(!meme || !meme.url) return;
-  const line="🖼️ **"+((meme.title||"Meme").replace(/\*/g,""))+"**\n"+meme.url;
+  const line="🖼️ **" + ((meme.title||"Meme").replace(/\*/g,"")) + "**\n" + meme.url;
   if(els.msgInput){
     const ta=els.msgInput;
     if(typeof htmlMode!=="undefined" && htmlMode && typeof exitHtmlMode==="function"){
       try{ exitHtmlMode(); }catch(_){}
     }
-    ta.value=line;
-    ta.focus();
+    const cur=ta.value||"";
+    ta.value = cur ? (cur.replace(/\s+$/,"") + "\n" + line) : line;
+    try{ ta.dispatchEvent(new Event("input",{bubbles:true})); }catch(_){}
   }
-  closeEmojiPanel();
-  // auto-send if connected
-  try{
-    if(connected && authed && typeof sendMessage==="function"){
-      setTimeout(()=>sendMessage(), 50);
-    }
-  }catch(_){}
+  // keep modal open
 }
+
 
 
 function getCaretScreenPos(){
@@ -3930,28 +3933,45 @@ function getEmojiModal(){
   if(!backdrop){
     backdrop=document.createElement("div");
     backdrop.id="v0EmojiBackdrop";
-    backdrop.onclick=()=>closeEmojiPanel();
     document.body.appendChild(backdrop);
   }
+  // backdrop closes ONLY via direct click on backdrop
+  backdrop.onclick=function(e){
+    if(e.target===backdrop) closeEmojiPanel();
+  };
   if(!modal){
     modal=document.createElement("div");
     modal.id="v0EmojiModal";
     modal.setAttribute("role","dialog");
+    modal.setAttribute("aria-modal","true");
     modal.setAttribute("aria-label","Emoji picker");
     document.body.appendChild(modal);
+  }
+  // clicks inside modal must not bubble to document handlers
+  if(!modal._v0stop){
+    modal._v0stop=true;
+    modal.addEventListener("click", function(e){ e.stopPropagation(); }, true);
+    modal.addEventListener("pointerdown", function(e){ e.stopPropagation(); }, true);
   }
   els.emojiPanel=modal;
   return modal;
 }
 
+
+
 function closeEmojiPanel(){
   const modal=document.getElementById("v0EmojiModal");
   const backdrop=document.getElementById("v0EmojiBackdrop");
-  if(modal) modal.classList.remove("on","anchored");
+  if(modal){
+    modal.classList.remove("on","anchored");
+    modal.style.cssText="";
+  }
   if(backdrop) backdrop.classList.remove("on");
   emojiPickerMode="insert";
   emojiReactMid=null;
 }
+
+
 
 function openEmojiPanel(mode, mid){
   emojiPickerMode=mode||"insert";
@@ -3960,42 +3980,27 @@ function openEmojiPanel(mode, mid){
   buildEmojiPanel(true);
   const backdrop=document.getElementById("v0EmojiBackdrop");
   if(backdrop) backdrop.classList.add("on");
-  modal.classList.add("on");
-  // Center as true modal (not sidebar). Optional caret-anchor if space allows.
+  // Always true centered modal — never bottom bar / sidebar
   modal.classList.remove("anchored");
-  modal.style.left="";
-  modal.style.top="";
-  modal.style.transform="";
-  try{
-    const caret=getCaretScreenPos();
-    const pw=Math.min(380, window.innerWidth-24);
-    const ph=Math.min(460, window.innerHeight-24);
-    let left=caret.x-40;
-    let top=caret.y-ph-16;
-    if(top>=12 && left>=8 && left+pw<=window.innerWidth-8){
-      modal.classList.add("anchored");
-      modal.style.left=left+"px";
-      modal.style.top=top+"px";
-      modal.style.transform="none";
-    }
-  }catch(_){}
+  modal.style.cssText = ""; // clear any drag inline coords
+  modal.classList.add("on");
   setTimeout(()=>{
     const s=modal.querySelector(".ep-search");
-    if(s) try{ s.focus(); }catch(_){}
-  }, 40);
+    if(s) try{ s.focus({preventScroll:true}); }catch(_){ try{s.focus();}catch(__){} }
+  }, 20);
   ensureEmojiPack().then(()=>{
     if(!modal.classList.contains("on")) return;
     if(emojiFilterCat!=="Memes"){
       renderEmojiCats();
       renderEmojiGrid();
     }
-    const st=modal.querySelector(".ep-status");
-    if(st && emojiFilterCat!=="Memes") st.textContent=emojiPackFull?(emojiPack.length+" emojis"):"Quick set";
   });
   if(emojiFilterCat==="Memes"){
     loadMemes().then(()=>renderEmojiGrid());
   }
 }
+
+
 
 function buildEmojiPanel(force){
   const panel=getEmojiModal();
@@ -4015,32 +4020,11 @@ function buildEmojiPanel(force){
   const closeBtn=document.createElement("button");
   closeBtn.type="button"; closeBtn.className="ep-close"; closeBtn.setAttribute("aria-label","Close");
   closeBtn.innerHTML="&times;";
-  closeBtn.onclick=(e)=>{ e.stopPropagation(); closeEmojiPanel(); };
+  closeBtn.onclick=(e)=>{ e.preventDefault(); e.stopPropagation(); closeEmojiPanel(); };
+  closeBtn.onpointerdown=(e)=>{ e.preventDefault(); e.stopPropagation(); closeEmojiPanel(); };
   titlebar.appendChild(title); titlebar.appendChild(closeBtn);
   panel.appendChild(titlebar);
 
-  // drag window by titlebar
-  (function(){
-    let ox=0,oy=0,dragging=false;
-    titlebar.addEventListener("pointerdown", e=>{
-      if(e.target.closest(".ep-close")) return;
-      dragging=true;
-      const r=panel.getBoundingClientRect();
-      ox=e.clientX-r.left; oy=e.clientY-r.top;
-      panel.classList.add("anchored");
-      panel.style.transform="none";
-      try{ titlebar.setPointerCapture(e.pointerId); }catch(_){}
-    });
-    titlebar.addEventListener("pointermove", e=>{
-      if(!dragging) return;
-      let left=e.clientX-ox, top=e.clientY-oy;
-      left=Math.max(4, Math.min(left, window.innerWidth-80));
-      top=Math.max(4, Math.min(top, window.innerHeight-80));
-      panel.style.left=left+"px";
-      panel.style.top=top+"px";
-    });
-    titlebar.addEventListener("pointerup", ()=>{ dragging=false; });
-  })();
 
 
   const head=document.createElement("div");
@@ -4350,13 +4334,7 @@ if(!window.__v0EmojiShortcut){
     if(els.emojiPanel && els.emojiPanel.classList.contains("on")) positionEmojiPanel();
   });
 }
-document.addEventListener("click",e=>{
-  const modal=document.getElementById("v0EmojiModal");
-  if(!modal||!modal.classList.contains("on")) return;
-  if(modal.contains(e.target)) return;
-  if(els.emojiBtn&&(e.target===els.emojiBtn||els.emojiBtn.contains(e.target))) return;
-  closeEmojiPanel();
-});
+
 els.connectBtn.onclick=connect;els.disconnectBtn.onclick=disconnect;
 els.sendBtn.onclick=sendMessage;
 els.msgInput.onkeydown=e=>{
