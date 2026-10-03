@@ -274,10 +274,11 @@
       display:none !important;
       position:fixed !important;
       inset:0 !important;
-      z-index:2147482990 !important;
-      background:rgba(0,0,0,.45) !important;
+      z-index:4990 !important;
+      background:rgba(0,0,0,.28) !important;
       margin:0 !important; padding:0 !important;
       border:none !important;
+      pointer-events:auto !important;
     }
     #v0EmojiBackdrop.on{ display:block !important; }
     #v0EmojiModal{
@@ -288,7 +289,8 @@
       right:auto;
       bottom:auto;
       transform:none !important;
-      z-index:5000 !important;
+      z-index:5001 !important;
+      pointer-events:auto !important;
       width:min(400px, calc(100vw - 32px)) !important;
       height:min(480px, calc(100vh - 32px)) !important;
       max-width:none !important;
@@ -314,6 +316,8 @@
       flex:0 0 44px; height:44px; box-sizing:border-box;
       padding:0 8px 0 14px;
       background:#3a3d45; user-select:none;
+      position:relative; z-index:2;
+      pointer-events:auto;
     }
     #v0EmojiModal .ep-title{ font-size:14px; font-weight:500; }
     #v0EmojiModal .ep-close{
@@ -325,6 +329,8 @@
     #v0EmojiModal .ep-head{
       display:flex; flex-direction:column; gap:8px;
       flex:0 0 auto; padding:8px 12px 6px;
+      position:relative; z-index:2;
+      pointer-events:auto;
     }
     #v0EmojiModal .ep-search{
       width:100%; box-sizing:border-box;
@@ -3935,7 +3941,6 @@ function getEmojiModal(){
     backdrop.id="v0EmojiBackdrop";
     document.body.appendChild(backdrop);
   }
-  // backdrop closes ONLY via direct click on backdrop
   backdrop.onclick=function(e){
     if(e.target===backdrop) closeEmojiPanel();
   };
@@ -3947,12 +3952,15 @@ function getEmojiModal(){
     modal.setAttribute("aria-label","Emoji picker");
     document.body.appendChild(modal);
   }
-  // clicks inside modal must not bubble to document handlers
-  if(!modal._v0stop){
-    modal._v0stop=true;
-    modal.addEventListener("click", function(e){ e.stopPropagation(); }, true);
-    modal.addEventListener("pointerdown", function(e){ e.stopPropagation(); }, true);
-  }
+  // Ensure modal is always on top of backdrop in DOM order too
+  try{
+    if(backdrop.nextSibling!==modal){
+      document.body.appendChild(backdrop);
+      document.body.appendChild(modal);
+    }
+  }catch(_){}
+  modal.style.pointerEvents="auto";
+  backdrop.style.pointerEvents="auto";
   els.emojiPanel=modal;
   return modal;
 }
@@ -4071,8 +4079,12 @@ function buildEmojiPanel(force){
   const closeBtn=document.createElement("button");
   closeBtn.type="button"; closeBtn.className="ep-close"; closeBtn.setAttribute("aria-label","Close");
   closeBtn.innerHTML="&times;";
-  closeBtn.onclick=(e)=>{ e.preventDefault(); e.stopPropagation(); closeEmojiPanel(); };
-  closeBtn.onpointerdown=(e)=>{ e.preventDefault(); e.stopPropagation(); closeEmojiPanel(); };
+  closeBtn.type="button";
+  closeBtn.addEventListener("click", function(e){
+    e.preventDefault();
+    e.stopPropagation();
+    closeEmojiPanel();
+  });
   titlebar.appendChild(title); titlebar.appendChild(closeBtn);
   panel.appendChild(titlebar);
 
