@@ -270,86 +270,97 @@
     #monacoHost{display:none;flex:1;height:160px;border:2px solid #333;border-radius:var(--radius);overflow:hidden}
     #monacoHost.on{display:block}
     #msgInput.html-hidden{display:none}
-    ./* ChromeOS-style floating emoji window */
-    #emojiPanel.emoji-panel, .emoji-panel{
-      display:none !important;
-      position:fixed !important;
-      z-index:10000 !important;
-      left:0; top:0;
-      width:340px;
-      height:420px;
-      max-width:calc(100vw - 16px);
-      max-height:calc(100vh - 16px);
-      margin:0;
-      padding:0;
+    ./* V0RT3X emoji + memes floating modal (viewport-fixed, not sidebar) */
+    #v0EmojiModal{
+      display:none;
+      position:fixed;
+      left:50%;
+      top:50%;
+      transform:translate(-50%,-50%);
+      z-index:2147483000;
+      width:min(380px, calc(100vw - 24px));
+      height:min(460px, calc(100vh - 24px));
+      margin:0; padding:0;
       box-sizing:border-box;
       flex-direction:column;
       background:#31333a;
-      border:1px solid rgba(255,255,255,.12);
-      border-radius:12px;
-      box-shadow:0 12px 40px rgba(0,0,0,.55), 0 0 0 1px rgba(0,0,0,.2);
+      border:1px solid rgba(255,255,255,.14);
+      border-radius:14px;
+      box-shadow:0 16px 48px rgba(0,0,0,.6);
       overflow:hidden;
       font-family:Roboto,system-ui,"Segoe UI",sans-serif;
       color:#e3e3e3;
-      pointer-events:auto;
+      isolation:isolate;
+      contain:layout style;
     }
-    #emojiPanel.emoji-panel.on, .emoji-panel.on{
-      display:flex !important;
+    #v0EmojiModal.on{display:flex}
+    #v0EmojiModal.anchored{
+      left:0; top:0;
+      transform:none;
     }
-    .emoji-panel .ep-titlebar{
+    #v0EmojiBackdrop{
+      display:none;
+      position:fixed; inset:0;
+      z-index:2147482999;
+      background:rgba(0,0,0,.35);
+    }
+    #v0EmojiBackdrop.on{display:block}
+    #v0EmojiModal .ep-titlebar{
       display:flex;align-items:center;justify-content:space-between;
-      padding:10px 12px 6px;flex-shrink:0;
-      cursor:default;user-select:none;
-      background:linear-gradient(180deg,#3a3d45 0%,#31333a 100%);
+      padding:10px 12px;flex:0 0 auto;
+      background:#3a3d45;cursor:move;user-select:none;
     }
-    .emoji-panel .ep-titlebar .ep-title{
-      font-size:13px;font-weight:500;color:#e8eaed;letter-spacing:.2px;
+    #v0EmojiModal .ep-title{font-size:13px;font-weight:500}
+    #v0EmojiModal .ep-close{
+      width:30px;height:30px;border:none;border-radius:50%;
+      background:transparent;color:#9aa0a6;font-size:20px;cursor:pointer;
     }
-    .emoji-panel .ep-titlebar .ep-close{
-      width:28px;height:28px;border:none;border-radius:50%;
-      background:transparent;color:#9aa0a6;font-size:18px;line-height:1;
-      cursor:pointer;display:flex;align-items:center;justify-content:center;
-    }
-    .emoji-panel .ep-titlebar .ep-close:hover{background:rgba(255,255,255,.1);color:#fff}
-    .emoji-panel .ep-head{
+    #v0EmojiModal .ep-close:hover{background:rgba(255,255,255,.1);color:#fff}
+    #v0EmojiModal .ep-head{
       display:flex;flex-direction:column;gap:8px;
-      padding:0 12px 8px;flex-shrink:0;
+      padding:0 12px 8px;flex:0 0 auto;
     }
-    .emoji-panel .ep-search{
+    #v0EmojiModal .ep-search{
       width:100%;box-sizing:border-box;
-      padding:10px 12px 10px 36px;
-      border-radius:24px;border:none;
+      padding:10px 12px 10px 36px;border-radius:24px;border:none;
       background:#1f1f1f url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='%239aa0a6'%3E%3Cpath d='M15.5 14h-.79l-.28-.27A6.47 6.47 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z'/%3E%3C/svg%3E") no-repeat 12px center;
       color:#e8eaed;font-size:13px;outline:none;
     }
-    .emoji-panel .ep-search:focus{box-shadow:0 0 0 2px #a8c7fa}
-    .emoji-panel .ep-search::placeholder{color:#9aa0a6}
-    .emoji-panel .ep-custom{display:flex;gap:6px}
-    .emoji-panel .ep-custom input{
+    #v0EmojiModal .ep-search:focus{box-shadow:0 0 0 2px #a8c7fa}
+    #v0EmojiModal .ep-custom{display:flex;gap:6px}
+    #v0EmojiModal .ep-custom input{
       flex:1;min-width:0;padding:7px 10px;border-radius:16px;border:1px solid #5f6368;
-      background:#1f1f1f;color:#e8eaed;font-size:12px;outline:none;
+      background:#1f1f1f;color:#e8eaed;font-size:12px;
     }
-    .emoji-panel .ep-custom button{
+    #v0EmojiModal .ep-custom button{
       padding:7px 12px;border-radius:16px;border:none;
       background:#a8c7fa;color:#062e6f;font-weight:600;font-size:12px;cursor:pointer;
     }
-    .emoji-panel .ep-status{font-size:11px;color:#9aa0a6;padding:0 12px 4px;flex-shrink:0}
-    .emoji-panel .ep-mode{
-      display:none;font-size:11px;color:#a8c7fa;padding:0 12px 6px;flex-shrink:0;
-    }
-    .emoji-panel .ep-mode.on{display:block}
-    .emoji-panel .ep-grid{
-      flex:1 1 auto;min-height:0;
-      overflow-y:auto;overflow-x:hidden;
+    #v0EmojiModal .ep-status{font-size:11px;color:#9aa0a6;padding:0 12px 4px;flex:0 0 auto}
+    #v0EmojiModal .ep-mode{display:none;font-size:11px;color:#a8c7fa;padding:0 12px 6px;flex:0 0 auto}
+    #v0EmojiModal .ep-mode.on{display:block}
+    /* CRITICAL: height:0 + flex:1 enables scrolling inside fixed modal */
+    #v0EmojiModal .ep-grid{
+      flex:1 1 auto;
+      height:0;
+      min-height:0;
+      overflow-x:hidden;
+      overflow-y:scroll;
+      -webkit-overflow-scrolling:touch;
+      overscroll-behavior:contain;
       display:grid;
       grid-template-columns:repeat(8, 1fr);
       gap:2px;
-      padding:4px 10px 10px;
+      padding:4px 10px 12px;
       align-content:start;
       scrollbar-width:thin;
-      scrollbar-color:#747775 transparent;
+      scrollbar-color:#888 transparent;
     }
-    .emoji-panel .ep-grid button{
+    #v0EmojiModal .ep-grid.memes-mode{
+      grid-template-columns:repeat(2, 1fr);
+      gap:8px;
+    }
+    #v0EmojiModal .ep-grid button.ep-emoji{
       background:transparent;border:none;
       font-size:22px;line-height:1;
       width:100%;aspect-ratio:1;
@@ -357,28 +368,42 @@
       display:flex;align-items:center;justify-content:center;
       font-family:"Noto Color Emoji","Apple Color Emoji","Segoe UI Emoji",sans-serif;
     }
-    .emoji-panel .ep-grid button:hover{background:rgba(232,234,237,.1)}
-    .emoji-panel .ep-grid button:focus{outline:2px solid #a8c7fa;outline-offset:-2px}
-    .emoji-panel .ep-section{
+    #v0EmojiModal .ep-grid button.ep-emoji:hover{background:rgba(255,255,255,.1)}
+    #v0EmojiModal .ep-meme{
+      display:flex;flex-direction:column;gap:4px;
+      background:#1f1f1f;border:1px solid #444;border-radius:10px;
+      overflow:hidden;cursor:pointer;padding:0;text-align:left;color:#e8eaed;
+    }
+    #v0EmojiModal .ep-meme:hover{border-color:#a8c7fa}
+    #v0EmojiModal .ep-meme img{
+      width:100%;height:110px;object-fit:cover;background:#111;display:block;
+    }
+    #v0EmojiModal .ep-meme .ep-meme-title{
+      font-size:11px;padding:4px 6px 6px;line-height:1.25;
+      max-height:2.5em;overflow:hidden;
+    }
+    #v0EmojiModal .ep-section{
       grid-column:1 / -1;
       font-size:12px;font-weight:500;color:#c4c7c5;
       padding:10px 4px 6px;
     }
-    .emoji-panel .ep-cats{
-      display:flex;flex-shrink:0;
+    #v0EmojiModal .ep-cats{
+      display:flex;flex:0 0 auto;
       border-top:1px solid rgba(255,255,255,.08);
       background:#292a2d;padding:6px 4px;gap:0;
+      overflow-x:auto;
     }
-    .emoji-panel .ep-cats button{
-      flex:1;border:none;background:transparent;color:#9aa0a6;
-      font-size:17px;padding:8px 0;border-radius:10px;cursor:pointer;line-height:1;
+    #v0EmojiModal .ep-cats button{
+      flex:1;min-width:32px;border:none;background:transparent;color:#9aa0a6;
+      font-size:16px;padding:8px 4px;border-radius:10px;cursor:pointer;line-height:1;
       font-family:"Noto Color Emoji","Apple Color Emoji","Segoe UI Emoji",sans-serif;
     }
-    .emoji-panel .ep-cats button:hover{background:rgba(255,255,255,.06);color:#e8eaed}
-    .emoji-panel .ep-cats button.on{
+    #v0EmojiModal .ep-cats button:hover{background:rgba(255,255,255,.06);color:#e8eaed}
+    #v0EmojiModal .ep-cats button.on{
       background:rgba(168,199,250,.18);color:#e8eaed;
       box-shadow:inset 0 -2px 0 #a8c7fa;
     }
+
 
 
     .emoji-panel button:hover{background:#222}
@@ -648,7 +673,6 @@
           <input type="file" id="fileInput" multiple />
           <input type="file" id="folderInput" webkitdirectory multiple />
         </div>
-        <div id="emojiPanel" class="emoji-panel"></div>
         <textarea id="msgInput" placeholder="Message… Enter send · Shift+Enter newline · starts with &lt; = HTML" disabled autocomplete="off" rows="2"></textarea>
         <div id="monacoHost"></div>
         <button class="btn" id="sendBtn" disabled><span class="material-symbols-outlined">send</span></button>
@@ -3542,8 +3566,12 @@ const EMOJI_CATS=[
   {id:"Activities", icon:"⚽", groups:["Activities"]},
   {id:"Objects", icon:"💡", groups:["Objects"]},
   {id:"Symbols", icon:"💯", groups:["Symbols"]},
-  {id:"Flags", icon:"🏳️", groups:["Flags"]}
+  {id:"Flags", icon:"🏳️", groups:["Flags"]},
+  {id:"Memes", icon:"🐸", groups:null, memes:true}
 ];
+let memeCache=[];
+let memeLoadPromise=null;
+
 let emojiPack=null;       // full list once loaded
 let emojiPackFull=false;  // true after remote/cache full load
 let emojiByGroup=null;
@@ -3737,6 +3765,84 @@ function insertEmojiChar(em){
   }
 }
 
+
+async function loadMemes(force){
+  if(!force && memeCache.length>=12) return memeCache;
+  if(memeLoadPromise && !force) return memeLoadPromise;
+  memeLoadPromise=(async()=>{
+    const items=[];
+    // 1) Reddit memes via meme-api
+    try{
+      const r=await fetch("https://meme-api.com/gimme/24", {mode:"cors"});
+      if(r.ok){
+        const d=await r.json();
+        const arr=Array.isArray(d.memes)?d.memes:(d.url?[d]:[]);
+        for(const m of arr){
+          if(m && m.url) items.push({
+            type:"reddit",
+            title:(m.title||"Meme").slice(0,80),
+            url:m.url,
+            thumb:m.preview && m.preview.length ? m.preview[m.preview.length-1] : m.url,
+            post:m.postLink||m.url
+          });
+        }
+      }
+    }catch(e){ console.warn("meme-api", e); }
+    // 2) Imgflip templates
+    try{
+      const r=await fetch("https://api.imgflip.com/get_memes", {mode:"cors"});
+      if(r.ok){
+        const d=await r.json();
+        const arr=(d && d.data && d.data.memes)||[];
+        for(const m of arr.slice(0,40)){
+          if(m && m.url) items.push({
+            type:"imgflip",
+            title:(m.name||"Template").slice(0,80),
+            url:m.url,
+            thumb:m.url,
+            post:m.url
+          });
+        }
+      }
+    }catch(e){ console.warn("imgflip", e); }
+    // 3) Guaranteed GIF/image fillers (keyless)
+    const fillers=[
+      {title:"Random cat GIF", url:"https://cataas.com/cat/gif", thumb:"https://cataas.com/cat"},
+      {title:"Random photo", url:"https://picsum.photos/600/400", thumb:"https://picsum.photos/200/140"},
+      {title:"Picsum seed A", url:"https://picsum.photos/seed/v0a/600/400", thumb:"https://picsum.photos/seed/v0a/200/140"},
+      {title:"Picsum seed B", url:"https://picsum.photos/seed/v0b/600/400", thumb:"https://picsum.photos/seed/v0b/200/140"},
+      {title:"DiceBear bot", url:"https://api.dicebear.com/7.x/bottts/svg?seed=meme", thumb:"https://api.dicebear.com/7.x/bottts/svg?seed=meme"},
+      {title:"Robohash", url:"https://robohash.org/v0rt3x.png", thumb:"https://robohash.org/v0rt3x.png?size=200x200"}
+    ];
+    for(const f of fillers) items.push({type:"cdn", title:f.title, url:f.url, thumb:f.thumb, post:f.url});
+    // shuffle lightly but keep reddit first
+    memeCache=items;
+    return memeCache;
+  })();
+  return memeLoadPromise;
+}
+
+function sendMemeLink(meme){
+  if(!meme || !meme.url) return;
+  const line="🖼️ **"+((meme.title||"Meme").replace(/\*/g,""))+"**\n"+meme.url;
+  if(els.msgInput){
+    const ta=els.msgInput;
+    if(typeof htmlMode!=="undefined" && htmlMode && typeof exitHtmlMode==="function"){
+      try{ exitHtmlMode(); }catch(_){}
+    }
+    ta.value=line;
+    ta.focus();
+  }
+  closeEmojiPanel();
+  // auto-send if connected
+  try{
+    if(connected && authed && typeof sendMessage==="function"){
+      setTimeout(()=>sendMessage(), 50);
+    }
+  }catch(_){}
+}
+
+
 function getCaretScreenPos(){
   // Prefer focused textarea/input caret; fall back to emoji button / composer
   const el=document.activeElement;
@@ -3818,8 +3924,31 @@ function positionEmojiPanel(){
   panel.style.bottom="auto";
 }
 
+function getEmojiModal(){
+  let modal=document.getElementById("v0EmojiModal");
+  let backdrop=document.getElementById("v0EmojiBackdrop");
+  if(!backdrop){
+    backdrop=document.createElement("div");
+    backdrop.id="v0EmojiBackdrop";
+    backdrop.onclick=()=>closeEmojiPanel();
+    document.body.appendChild(backdrop);
+  }
+  if(!modal){
+    modal=document.createElement("div");
+    modal.id="v0EmojiModal";
+    modal.setAttribute("role","dialog");
+    modal.setAttribute("aria-label","Emoji picker");
+    document.body.appendChild(modal);
+  }
+  els.emojiPanel=modal;
+  return modal;
+}
+
 function closeEmojiPanel(){
-  if(els.emojiPanel) els.emojiPanel.classList.remove("on");
+  const modal=document.getElementById("v0EmojiModal");
+  const backdrop=document.getElementById("v0EmojiBackdrop");
+  if(modal) modal.classList.remove("on","anchored");
+  if(backdrop) backdrop.classList.remove("on");
   emojiPickerMode="insert";
   emojiReactMid=null;
 }
@@ -3827,35 +3956,50 @@ function closeEmojiPanel(){
 function openEmojiPanel(mode, mid){
   emojiPickerMode=mode||"insert";
   emojiReactMid=mid||null;
-  // Floating window lives on body (separate from chat layout)
-  if(!els.emojiPanel){
-    const p=document.createElement("div");
-    p.id="emojiPanel"; p.className="emoji-panel";
-    document.body.appendChild(p);
-    els.emojiPanel=p;
-  } else if(els.emojiPanel.parentElement!==document.body){
-    document.body.appendChild(els.emojiPanel);
-  }
+  const modal=getEmojiModal();
   buildEmojiPanel(true);
-  els.emojiPanel.classList.add("on");
-  positionEmojiPanel();
-  // Focus search like ChromeOS
+  const backdrop=document.getElementById("v0EmojiBackdrop");
+  if(backdrop) backdrop.classList.add("on");
+  modal.classList.add("on");
+  // Center as true modal (not sidebar). Optional caret-anchor if space allows.
+  modal.classList.remove("anchored");
+  modal.style.left="";
+  modal.style.top="";
+  modal.style.transform="";
+  try{
+    const caret=getCaretScreenPos();
+    const pw=Math.min(380, window.innerWidth-24);
+    const ph=Math.min(460, window.innerHeight-24);
+    let left=caret.x-40;
+    let top=caret.y-ph-16;
+    if(top>=12 && left>=8 && left+pw<=window.innerWidth-8){
+      modal.classList.add("anchored");
+      modal.style.left=left+"px";
+      modal.style.top=top+"px";
+      modal.style.transform="none";
+    }
+  }catch(_){}
   setTimeout(()=>{
-    const s=els.emojiPanel.querySelector(".ep-search");
-    if(s) try{ s.focus(); s.select(); }catch(_){}
-  }, 30);
+    const s=modal.querySelector(".ep-search");
+    if(s) try{ s.focus(); }catch(_){}
+  }, 40);
   ensureEmojiPack().then(()=>{
-    if(!els.emojiPanel || !els.emojiPanel.classList.contains("on")) return;
-    renderEmojiCats();
-    renderEmojiGrid();
-    const st=els.emojiPanel.querySelector(".ep-status");
-    if(st) st.textContent=emojiPackFull ? (emojiPack.length+" emojis") : "Quick set";
-  }).catch(()=>{});
+    if(!modal.classList.contains("on")) return;
+    if(emojiFilterCat!=="Memes"){
+      renderEmojiCats();
+      renderEmojiGrid();
+    }
+    const st=modal.querySelector(".ep-status");
+    if(st && emojiFilterCat!=="Memes") st.textContent=emojiPackFull?(emojiPack.length+" emojis"):"Quick set";
+  });
+  if(emojiFilterCat==="Memes"){
+    loadMemes().then(()=>renderEmojiGrid());
+  }
 }
 
 function buildEmojiPanel(force){
-  const panel=els.emojiPanel; if(!panel) return;
-  if(panel.dataset.ui==="cros" && !force){
+  const panel=getEmojiModal();
+  if(panel.dataset.ui==="cros" && !force && panel.querySelector(".ep-grid")){
     updateEmojiModeLabel();
     renderEmojiGrid();
     return;
@@ -3874,6 +4018,30 @@ function buildEmojiPanel(force){
   closeBtn.onclick=(e)=>{ e.stopPropagation(); closeEmojiPanel(); };
   titlebar.appendChild(title); titlebar.appendChild(closeBtn);
   panel.appendChild(titlebar);
+
+  // drag window by titlebar
+  (function(){
+    let ox=0,oy=0,dragging=false;
+    titlebar.addEventListener("pointerdown", e=>{
+      if(e.target.closest(".ep-close")) return;
+      dragging=true;
+      const r=panel.getBoundingClientRect();
+      ox=e.clientX-r.left; oy=e.clientY-r.top;
+      panel.classList.add("anchored");
+      panel.style.transform="none";
+      try{ titlebar.setPointerCapture(e.pointerId); }catch(_){}
+    });
+    titlebar.addEventListener("pointermove", e=>{
+      if(!dragging) return;
+      let left=e.clientX-ox, top=e.clientY-oy;
+      left=Math.max(4, Math.min(left, window.innerWidth-80));
+      top=Math.max(4, Math.min(top, window.innerHeight-80));
+      panel.style.left=left+"px";
+      panel.style.top=top+"px";
+    });
+    titlebar.addEventListener("pointerup", ()=>{ dragging=false; });
+  })();
+
 
   const head=document.createElement("div");
   head.className="ep-head";
@@ -3925,11 +4093,12 @@ function buildEmojiPanel(force){
   const grid=document.createElement("div");
   grid.className="ep-grid";
   grid.addEventListener("scroll",()=>{
+    if(emojiFilterCat==="Memes") return;
     if(grid.scrollTop+grid.clientHeight >= grid.scrollHeight-48){
       emojiRenderLimit=Math.min(emojiRenderLimit+90, 2500);
       renderEmojiGrid(true);
     }
-  });
+  }, {passive:true});
   panel.appendChild(grid);
 
   const cats=document.createElement("div");
@@ -3947,7 +4116,8 @@ function buildEmojiPanel(force){
 }
 
 function updateEmojiModeLabel(){
-  const mode=els.emojiPanel && els.emojiPanel.querySelector(".ep-mode");
+  const panel=document.getElementById("v0EmojiModal")||els.emojiPanel;
+  const mode=panel && panel.querySelector(".ep-mode");
   if(!mode) return;
   if(emojiPickerMode==="react"){
     mode.classList.add("on");
@@ -3959,7 +4129,8 @@ function updateEmojiModeLabel(){
 }
 
 function renderEmojiCats(){
-  const cats=els.emojiPanel && els.emojiPanel.querySelector(".ep-cats");
+  const panel=document.getElementById("v0EmojiModal")||els.emojiPanel;
+  const cats=panel && panel.querySelector(".ep-cats");
   if(!cats) return;
   cats.innerHTML="";
   for(const c of EMOJI_CATS){
@@ -3971,19 +4142,73 @@ function renderEmojiCats(){
     b.onclick=()=>{
       emojiFilterCat=c.id;
       emojiSearch="";
-      const s=els.emojiPanel.querySelector(".ep-search");
+      const panel=document.getElementById("v0EmojiModal")||els.emojiPanel;
+      const s=panel && panel.querySelector(".ep-search");
       if(s) s.value="";
       emojiRenderLimit=180;
       renderEmojiCats();
       renderEmojiGrid();
+      if(c.id==="Memes") loadMemes(true).then(()=>renderEmojiGrid());
     };
     cats.appendChild(b);
   }
 }
 
 function renderEmojiGrid(append){
-  const grid=els.emojiPanel && els.emojiPanel.querySelector(".ep-grid");
+  const panel=document.getElementById("v0EmojiModal") || (els.emojiPanel);
+  if(!panel) return;
+  const grid=panel.querySelector(".ep-grid");
   if(!grid) return;
+
+  // Memes mode
+  if(emojiFilterCat==="Memes"){
+    grid.classList.add("memes-mode");
+    if(!append) grid.innerHTML="";
+    const st=panel.querySelector(".ep-status");
+    if(st) st.textContent="Loading memes…";
+    const paint=(list)=>{
+      if(!append){
+        grid.innerHTML="";
+        const sec=document.createElement("div");
+        sec.className="ep-section";
+        sec.textContent="Memes · tap to send link";
+        grid.appendChild(sec);
+      }
+      for(const m of list){
+        const b=document.createElement("button");
+        b.type="button";
+        b.className="ep-meme";
+        b.title=(m.title||"")+"\n"+m.url;
+        const img=document.createElement("img");
+        img.loading="lazy";
+        img.alt=m.title||"meme";
+        img.src=m.thumb||m.url;
+        img.onerror=()=>{ img.style.display="none"; };
+        const cap=document.createElement("div");
+        cap.className="ep-meme-title";
+        cap.textContent=m.title||m.url;
+        b.appendChild(img);
+        b.appendChild(cap);
+        b.onclick=ev=>{
+          ev.preventDefault();
+          ev.stopPropagation();
+          sendMemeLink(m);
+        };
+        grid.appendChild(b);
+      }
+      if(st) st.textContent=list.length+" memes · tap sends link";
+    };
+    if(memeCache.length){
+      paint(memeCache);
+    } else {
+      loadMemes().then(list=>paint(list||[])).catch(()=>{
+        if(st) st.textContent="Meme load failed";
+      });
+    }
+    return;
+  }
+
+  grid.classList.remove("memes-mode");
   const list=filterEmojis();
   const slice=list.slice(0, emojiRenderLimit);
   if(!append){
@@ -3995,13 +4220,13 @@ function renderEmojiGrid(append){
       grid.appendChild(sec);
     }
   }
-  // when appending, skip section
-  const existing=append ? grid.querySelectorAll("button").length : 0;
+  const existing=append ? grid.querySelectorAll("button.ep-emoji").length : 0;
   for(let i=existing; i<slice.length; i++){
     const e=slice[i];
     if(!e || !e.char) continue;
     const b=document.createElement("button");
     b.type="button";
+    b.className="ep-emoji";
     b.textContent=e.char;
     b.title=(e.name||"")+(e.codes ? " · "+e.codes : "");
     b.onclick=ev=>{
@@ -4011,13 +4236,11 @@ function renderEmojiGrid(append){
     };
     grid.appendChild(b);
   }
-  const st=els.emojiPanel && els.emojiPanel.querySelector(".ep-status");
+  const st=panel.querySelector(".ep-status");
   if(st){
     st.textContent=(emojiSearch ? list.length+" results" : slice.length+" shown")+(emojiPackFull ? " · "+emojiPack.length+" total" : " · loading…");
   }
 }
-
-
 
 
 function getComposerText(){
@@ -4128,8 +4351,9 @@ if(!window.__v0EmojiShortcut){
   });
 }
 document.addEventListener("click",e=>{
-  if(!els.emojiPanel||!els.emojiPanel.classList.contains("on")) return;
-  if(els.emojiPanel.contains(e.target)) return;
+  const modal=document.getElementById("v0EmojiModal");
+  if(!modal||!modal.classList.contains("on")) return;
+  if(modal.contains(e.target)) return;
   if(els.emojiBtn&&(e.target===els.emojiBtn||els.emojiBtn.contains(e.target))) return;
   closeEmojiPanel();
 });
