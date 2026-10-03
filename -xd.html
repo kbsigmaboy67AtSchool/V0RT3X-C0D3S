@@ -269,9 +269,21 @@
     #monacoHost{display:none;flex:1;height:160px;border:2px solid #333;border-radius:var(--radius);overflow:hidden}
     #monacoHost.on{display:block}
     #msgInput.html-hidden{display:none}
-    .emoji-panel{display:none;position:absolute;bottom:70px;left:12px;right:12px;max-width:420px;max-height:220px;overflow:auto;background:#111;border:2px solid #fff;border-radius:14px;padding:10px;z-index:30;flex-wrap:wrap;gap:4px}
+    ..emoji-panel{display:none;position:absolute;bottom:70px;left:12px;right:12px;max-width:480px;max-height:340px;overflow:hidden;background:#0c0c0c;border:2px solid #fff;border-radius:14px;padding:0;z-index:40;flex-direction:column}
     .emoji-panel.on{display:flex}
-    .emoji-panel button{background:transparent;border:none;font-size:1.35rem;cursor:pointer;padding:4px;border-radius:8px;line-height:1}
+    .emoji-panel .ep-head{display:flex;flex-direction:column;gap:6px;padding:8px 10px;border-bottom:1px solid #333;background:#111}
+    .emoji-panel .ep-search{width:100%;box-sizing:border-box;padding:7px 10px;border-radius:8px;border:1px solid #444;background:#1a1a1a;color:#fff;font-size:.85rem}
+    .emoji-panel .ep-custom{display:flex;gap:6px}
+    .emoji-panel .ep-custom input{flex:1;padding:6px 8px;border-radius:8px;border:1px solid #444;background:#1a1a1a;color:#fff;font-size:.78rem}
+    .emoji-panel .ep-custom button{padding:6px 10px;border-radius:8px;border:1px solid #5b8def;background:#1a2a44;color:#fff;cursor:pointer;font-size:.78rem}
+    .emoji-panel .ep-tabs{display:flex;gap:4px;overflow-x:auto;padding:0 8px 6px;scrollbar-width:thin}
+    .emoji-panel .ep-tabs button{flex:0 0 auto;padding:4px 8px;border-radius:999px;border:1px solid #333;background:#1a1a1a;color:#aaa;cursor:pointer;font-size:.72rem}
+    .emoji-panel .ep-tabs button.on{border-color:#5b8def;color:#fff;background:rgba(91,141,239,.2)}
+    .emoji-panel .ep-status{font-size:.7rem;color:#666;padding:0 10px 4px}
+    .emoji-panel .ep-grid{flex:1;overflow:auto;display:flex;flex-wrap:wrap;gap:2px;padding:8px;align-content:flex-start;min-height:120px}
+    .emoji-panel .ep-grid button{background:transparent;border:none;font-size:1.35rem;cursor:pointer;padding:4px;border-radius:8px;line-height:1;width:36px;height:36px}
+    .emoji-panel .ep-grid button:hover{background:#222}
+    .emoji-panel .ep-mode{font-size:.72rem;color:#5b8def;padding:4px 10px 8px}
     .emoji-panel button:hover{background:#222}
     .msg .html-frame{width:100%;min-height:120px;max-height:360px;border:1px solid #333;border-radius:10px;background:#0a0a0a;margin-top:6px}
     .mode-tag{font-size:.68rem;color:var(--voice);padding:2px 8px;border:1px solid var(--voice);border-radius:999px}
@@ -1173,6 +1185,7 @@ function openMsgMenu(mid){
   const recent=mine && (Date.now()-(m.ts||0) < UNSEND_MS);
   const acts=[];
   acts.push({label:"Reply", fn:"reply"});
+  acts.push({label:"React…", fn:"react_pick"});
   acts.push({label:"React 👍", fn:"react_thumb"});
   acts.push({label:"React ❤️", fn:"react_heart"});
   acts.push({label:"React 😂", fn:"react_laugh"});
@@ -1207,6 +1220,11 @@ function msgMenuAction(fn){
     return;
   }
   if(fn==="reply"){ setReplyTo(mid); els.msgMenu.classList.remove("on"); return; }
+  if(fn==="react_pick"){
+    try{ els.msgMenu.classList.remove("on"); }catch(_){}
+    openEmojiPanel("react", mid);
+    return;
+  }
   if(fn==="react_thumb"){ toggleReaction(mid,"👍"); els.msgMenu.classList.remove("on"); return; }
   if(fn==="react_heart"){ toggleReaction(mid,"❤️"); els.msgMenu.classList.remove("on"); return; }
   if(fn==="react_laugh"){ toggleReaction(mid,"😂"); els.msgMenu.classList.remove("on"); return; }
@@ -3410,38 +3428,311 @@ function removePeer(id){
 
 
 // ── Emoji (Unicode only — no Chrome picker / license issues) ──
-const EMOJIS="😀😁😂🤣😃😄😅😆😉😊😋😎😍😘🥰😗🙂🤗🤩🤔🤨😐😑😶🙄😏😣😥😮🤐😯😪😫🥱😴😌😛😜😝🤤😒😓😔😕🙃🤑😲🙁😖😞😟😤😢😭😦😧😨😩🤯😬😰😱🥵🥶😳🤪😵😠😡🤬😷🤒🤕🤢🤮🤧😇🥳🥺🤡🤠😈💀👻👽🤖💩🔥✨⭐🌟💯🎉👍👎👏🙌👋🤝✌️🤞🤟💪❤️🧡💛💚💙💜🖤🤍💔💕💖💗💘".split(/(?:)/u).filter(x=>x.trim());
-function buildEmojiPanel(){
-  if(!els.emojiPanel||els.emojiPanel.childNodes.length) return;
-  for(const em of EMOJIS){
-    const b=document.createElement("button");
-    b.type="button"; b.textContent=em;
-    b.onclick=()=>{
-      if(htmlMode&&monacoEditor){
-        const sel=monacoEditor.getSelection();
-        monacoEditor.executeEdits("",[{range:sel,text:em,forceMoveMarkers:true}]);
-        monacoEditor.focus();
-      } else {
-        const ta=els.msgInput;
-        const start=ta.selectionStart, end=ta.selectionEnd;
-        ta.value=ta.value.slice(0,start)+em+ta.value.slice(end);
-        ta.selectionStart=ta.selectionEnd=start+em.length;
-        ta.focus(); onComposerInput();
-      }
-      els.emojiPanel.classList.remove("on");
-    };
-    els.emojiPanel.appendChild(b);
+/* ===== Full emoji pack (lazy) + reactions ===== */
+const EMOJI_SOURCES=[
+  "https://kbsigmaboy67atschool.github.io/.bin/e/2026.1.json",
+  "https://cdn.jsdelivr.net/gh/kbsigmaboy67AtSchool/.bin@main/e/2026.1.json",
+  "https://raw.githubusercontent.com/kbsigmaboy67AtSchool/.bin/main/e/2026.1.json"
+];
+const EMOJI_QUICK="😀😁😂🤣😃😄😅😆😉😊😋😎😍😘🥰😗🙂🤗🤩🤔🤨😐😑😶🙄😏😣😥😮🤐😯😪😫🥱😴😌😛😜😝🤤😒😓😔😕🙃🤑😲🙁😖😞😟😤😢😭😦😧😨😩🤯😬😰😱🥵🥶😳🤪😵😠😡🤬😷🤒🤕🤢🤮🤧😇🥳🥺🤡🤠😈💀👻👽🤖💩🔥✨⭐🌟💯🎉👍👎👏🙌👋🤝✌️🤞🤟💪❤️🧡💛💚💙💜🖤🤍💔💕💖💗💘".split(/(?:)/u).filter(x=>x.trim());
+let emojiPack=null; // [{char,name,codes,group,...}]
+let emojiByGroup=null;
+let emojiLoadPromise=null;
+let emojiPickerMode="insert"; // insert | react
+let emojiReactMid=null;
+let emojiFilterGroup="All";
+let emojiSearch="";
+let emojiRenderLimit=120;
+
+function codesToEmoji(input){
+  if(input==null) return null;
+  let s=String(input).trim();
+  if(!s) return null;
+  // already contains emoji chars
+  try{
+    if(/\p{Extended_Pictographic}/u.test(s) || /\p{Emoji_Presentation}/u.test(s)){
+      // if mostly emoji, return as-is (allow sequences)
+      if(s.length<=32) return s;
+    }
+  }catch(_){}
+  // URI-encoded UTF-8
+  if(/%[0-9A-Fa-f]{2}/.test(s)){
+    try{
+      const d=decodeURIComponent(s);
+      if(d&&d!==s) return d;
+    }catch(_){}
   }
+  // HTML entity &#x1F600; or &#128512;
+  const ent=s.match(/^&#x([0-9A-Fa-f]+);?$/i)||s.match(/^&#(\d+);?$/);
+  if(ent){
+    try{ return String.fromCodePoint(ent[1].startsWith?parseInt(ent[1],ent[0].toLowerCase().includes('x')?16:10):parseInt(ent[1],10)); }catch(_){}
+  }
+  // U+1F600, 1F600, \u{1F600}, 1F600-1F3FB
+  const cleaned=s.replace(/\\u\{?/gi,"").replace(/U\+?/gi,"").replace(/\}/g,"");
+  const parts=cleaned.split(/[\s,_\-+.]+/).filter(p=>/^[0-9A-Fa-f]{2,8}$/.test(p));
+  if(parts.length){
+    try{ return parts.map(p=>String.fromCodePoint(parseInt(p,16))).join(""); }catch(_){}
+  }
+  // single hex without separators
+  if(/^[0-9A-Fa-f]{4,8}$/.test(s)){
+    try{ return String.fromCodePoint(parseInt(s,16)); }catch(_){}
+  }
+  return null;
 }
-if(els.emojiBtn){
-  els.emojiBtn.onclick=()=>{
-    buildEmojiPanel();
-    els.emojiPanel.classList.toggle("on");
-  };
-  document.addEventListener("click",e=>{
-    if(!els.emojiPanel.contains(e.target)&&e.target!==els.emojiBtn) els.emojiPanel.classList.remove("on");
+
+function idbEmojiGet(){
+  return new Promise((resolve)=>{
+    try{
+      const raw=localStorage.getItem("v0rt3x_emoji_pack_2026_1");
+      if(!raw){ resolve(null); return; }
+      const parsed=JSON.parse(raw);
+      resolve(parsed);
+    }catch(_){ resolve(null); }
   });
 }
+function idbEmojiSet(pack){
+  return new Promise((resolve)=>{
+    try{
+      // slim already; may exceed quota on tiny devices — ignore fail
+      localStorage.setItem("v0rt3x_emoji_pack_2026_1", JSON.stringify(pack));
+      resolve(true);
+    }catch(_){ resolve(false); }
+  });
+}
+
+async function ensureEmojiPack(){
+  if(emojiPack&&emojiPack.length) return emojiPack;
+  if(emojiLoadPromise) return emojiLoadPromise;
+  emojiLoadPromise=(async()=>{
+    // memory / IDB cache
+    try{
+      const cached=await idbEmojiGet();
+      if(cached&&Array.isArray(cached.list)&&cached.list.length>100){
+        emojiPack=cached.list;
+        indexEmojiPack();
+        return emojiPack;
+      }
+    }catch(_){}
+    let lastErr=null;
+    for(const url of EMOJI_SOURCES){
+      try{
+        const ctrl=typeof AbortController!=="undefined"?new AbortController():null;
+        const to=setTimeout(()=>{try{ctrl&&ctrl.abort();}catch(_){}},12000);
+        const res=await fetch(url,{signal:ctrl?ctrl.signal:undefined,mode:"cors",cache:"force-cache"});
+        clearTimeout(to);
+        if(!res.ok) throw new Error("HTTP "+res.status);
+        const data=await res.json();
+        if(!Array.isArray(data)||!data.length) throw new Error("bad json");
+        // slim pack for RAM: keep essentials only
+        emojiPack=data.map(x=>({
+          char:x.char,
+          name:x.name||"",
+          codes:x.codes||"",
+          group:x.group||"Other"
+        }));
+        indexEmojiPack();
+        try{ await idbEmojiSet({v:1,list:emojiPack,ts:Date.now()}); }catch(_){}
+        return emojiPack;
+      }catch(e){ lastErr=e; }
+    }
+    console.warn("emoji pack load failed", lastErr);
+    emojiPack=EMOJI_QUICK.map(c=>({char:c,name:"",codes:"",group:"Quick"}));
+    indexEmojiPack();
+    return emojiPack;
+  })();
+  try{ return await emojiLoadPromise; }
+  finally{ /* keep promise for reuse */ }
+}
+
+function indexEmojiPack(){
+  emojiByGroup=new Map();
+  for(const e of emojiPack){
+    const g=e.group||"Other";
+    if(!emojiByGroup.has(g)) emojiByGroup.set(g,[]);
+    emojiByGroup.get(g).push(e);
+  }
+}
+
+function filterEmojis(){
+  const q=emojiSearch.trim().toLowerCase();
+  let list;
+  if(emojiFilterGroup&&emojiFilterGroup!=="All"&&emojiByGroup){
+    list=emojiByGroup.get(emojiFilterGroup)||[];
+  } else {
+    list=emojiPack||[];
+  }
+  if(!q) return list;
+  const out=[];
+  for(let i=0;i<list.length;i++){
+    const e=list[i];
+    if((e.name&&e.name.toLowerCase().includes(q))||
+       (e.codes&&e.codes.toLowerCase().includes(q))||
+       (e.char&&e.char.includes(q))) out.push(e);
+    if(out.length>=800) break; // cap search results
+  }
+  return out;
+}
+
+function insertEmojiChar(em){
+  if(!em) return;
+  if(emojiPickerMode==="react"&&emojiReactMid){
+    toggleReaction(emojiReactMid, em);
+    closeEmojiPanel();
+    try{ els.msgMenu&&els.msgMenu.classList.remove("on"); }catch(_){}
+    return;
+  }
+  if(typeof htmlMode!=="undefined"&&htmlMode&&typeof monacoEditor!=="undefined"&&monacoEditor){
+    try{
+      const sel=monacoEditor.getSelection();
+      monacoEditor.executeEdits("",[{range:sel,text:em,forceMoveMarkers:true}]);
+      monacoEditor.focus();
+    }catch(_){}
+  } else if(els.msgInput){
+    const ta=els.msgInput;
+    const start=ta.selectionStart||0, end=ta.selectionEnd||0;
+    const val=ta.value||"";
+    ta.value=val.slice(0,start)+em+val.slice(end);
+    ta.selectionStart=ta.selectionEnd=start+em.length;
+    ta.focus();
+    try{ ta.dispatchEvent(new Event("input",{bubbles:true})); }catch(_){}
+  }
+}
+
+function closeEmojiPanel(){
+  if(els.emojiPanel) els.emojiPanel.classList.remove("on");
+  emojiPickerMode="insert";
+  emojiReactMid=null;
+}
+
+function openEmojiPanel(mode, mid){
+  emojiPickerMode=mode||"insert";
+  emojiReactMid=mid||null;
+  buildEmojiPanel(true);
+  if(els.emojiPanel) els.emojiPanel.classList.add("on");
+}
+
+function buildEmojiPanel(force){
+  const panel=els.emojiPanel; if(!panel) return;
+  if(panel.dataset.ready==="1"&&!force){
+    updateEmojiModeLabel();
+    renderEmojiGrid();
+    return;
+  }
+  panel.innerHTML="";
+  panel.dataset.ready="1";
+
+  const head=document.createElement("div"); head.className="ep-head";
+  const search=document.createElement("input");
+  search.className="ep-search"; search.type="search";
+  search.placeholder="Search name or code (1F600, U+1F600, %F0%9F…)";
+  search.value=emojiSearch;
+  search.oninput=()=>{ emojiSearch=search.value; emojiRenderLimit=120; renderEmojiGrid(); };
+
+  const custom=document.createElement("div"); custom.className="ep-custom";
+  const customIn=document.createElement("input");
+  customIn.placeholder="Custom: 1F600 · U+1F44D · URI · paste emoji";
+  customIn.spellcheck=false;
+  const customBtn=document.createElement("button"); customBtn.type="button"; customBtn.textContent="Use";
+  const applyCustom=()=>{
+    const em=codesToEmoji(customIn.value);
+    if(!em){ customIn.style.borderColor="#ff4d6a"; return; }
+    customIn.style.borderColor="#444";
+    insertEmojiChar(em);
+  };
+  customBtn.onclick=applyCustom;
+  customIn.onkeydown=e=>{ if(e.key==="Enter"){ e.preventDefault(); applyCustom(); } };
+  custom.appendChild(customIn); custom.appendChild(customBtn);
+
+  head.appendChild(search); head.appendChild(custom);
+  panel.appendChild(head);
+
+  const tabs=document.createElement("div"); tabs.className="ep-tabs"; tabs.id="epTabs";
+  panel.appendChild(tabs);
+
+  const status=document.createElement("div"); status.className="ep-status"; status.id="epStatus";
+  status.textContent="Loading emoji pack…";
+  panel.appendChild(status);
+
+  const mode=document.createElement("div"); mode.className="ep-mode"; mode.id="epMode";
+  panel.appendChild(mode);
+  updateEmojiModeLabel();
+
+  const grid=document.createElement("div"); grid.className="ep-grid"; grid.id="epGrid";
+  grid.addEventListener("scroll",()=>{
+    if(grid.scrollTop+grid.clientHeight>=grid.scrollHeight-40){
+      emojiRenderLimit=Math.min(emojiRenderLimit+100, 2000);
+      renderEmojiGrid(true);
+    }
+  });
+  panel.appendChild(grid);
+
+  // Quick emojis first for zero-lag
+  if(!emojiPack){
+    emojiPack=EMOJI_QUICK.map(c=>({char:c,name:"quick",codes:"",group:"Quick"}));
+    indexEmojiPack();
+  }
+  renderEmojiTabs();
+  renderEmojiGrid();
+
+  // background full pack
+  ensureEmojiPack().then(()=>{
+    renderEmojiTabs();
+    renderEmojiGrid();
+    const st=$("epStatus");
+    if(st) st.textContent=(emojiPack?emojiPack.length:0)+" emojis · search or enter codes";
+  }).catch(()=>{
+    const st=$("epStatus");
+    if(st) st.textContent="Using quick set (full pack failed to load)";
+  });
+}
+
+function updateEmojiModeLabel(){
+  const mode=$("epMode"); if(!mode) return;
+  mode.textContent=emojiPickerMode==="react"
+    ?("Reaction mode · message "+(emojiReactMid||"").slice(0,8))
+    :"Insert into message";
+}
+
+function renderEmojiTabs(){
+  const tabs=$("epTabs"); if(!tabs) return;
+  const groups=["All","Quick"];
+  if(emojiByGroup){
+    for(const g of emojiByGroup.keys()){
+      if(g!=="Quick"&&!groups.includes(g)) groups.push(g);
+    }
+  }
+  tabs.innerHTML="";
+  for(const g of groups){
+    const b=document.createElement("button");
+    b.type="button"; b.textContent=g.length>14?g.slice(0,12)+"…":g;
+    b.title=g;
+    if(g===emojiFilterGroup) b.classList.add("on");
+    b.onclick=()=>{ emojiFilterGroup=g; emojiRenderLimit=120; renderEmojiTabs(); renderEmojiGrid(); };
+    tabs.appendChild(b);
+  }
+}
+
+function renderEmojiGrid(append){
+  const grid=$("epGrid"); if(!grid) return;
+  const list=filterEmojis();
+  const slice=list.slice(0, emojiRenderLimit);
+  if(!append) grid.innerHTML="";
+  const start=append?grid.childNodes.length:0;
+  for(let i=start;i<slice.length;i++){
+    const e=slice[i];
+    const b=document.createElement("button");
+    b.type="button";
+    b.textContent=e.char;
+    b.title=(e.name||"")+(e.codes?" · "+e.codes:"");
+    b.onclick=(ev)=>{ ev.preventDefault(); insertEmojiChar(e.char); };
+    grid.appendChild(b);
+  }
+  const st=$("epStatus");
+  if(st&&emojiPack){
+    st.textContent=slice.length+" / "+list.length+(list.length>slice.length?" · scroll for more":"")+" · pack "+emojiPack.length;
+  }
+}
+
 
 function getComposerText(){
   if(htmlMode&&monacoEditor) return monacoEditor.getValue();
@@ -3518,6 +3809,22 @@ function loadMonaco(){
 // patch sendMessage to use getComposerText + HTML flag
 const _sendMessageOrig=typeof sendMessage==="function"?sendMessage:null;
 
+if(els.emojiBtn){
+  els.emojiBtn.onclick=(e)=>{
+    e.stopPropagation();
+    if(els.emojiPanel&&els.emojiPanel.classList.contains("on")&&emojiPickerMode==="insert"){
+      closeEmojiPanel();
+    } else {
+      openEmojiPanel("insert", null);
+    }
+  };
+}
+document.addEventListener("click",e=>{
+  if(!els.emojiPanel||!els.emojiPanel.classList.contains("on")) return;
+  if(els.emojiPanel.contains(e.target)) return;
+  if(els.emojiBtn&&(e.target===els.emojiBtn||els.emojiBtn.contains(e.target))) return;
+  closeEmojiPanel();
+});
 els.connectBtn.onclick=connect;els.disconnectBtn.onclick=disconnect;
 els.sendBtn.onclick=sendMessage;
 els.msgInput.onkeydown=e=>{
