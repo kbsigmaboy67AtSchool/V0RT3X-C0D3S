@@ -389,7 +389,14 @@
     }
     #v0EmojiModal .ep-meme:hover{ border-color:#a8c7fa; }
     #v0EmojiModal .ep-meme img{
-      width:100%; height:100px; object-fit:cover; background:#111; display:block;
+      width:100%; height:120px; object-fit:cover; background:#111; display:block;
+    }
+    #v0EmojiModal .ep-meme.ep-meme-noimg{
+      min-height:100px; justify-content:center;
+      background:linear-gradient(135deg,#2a2a2a,#1a1a1a);
+    }
+    #v0EmojiModal .ep-meme.ep-meme-noimg .ep-meme-title{
+      padding:16px 8px; font-size:12px; text-align:center;
     }
     #v0EmojiModal .ep-meme .ep-meme-title{
       font-size:11px; padding:4px 6px 6px; line-height:1.25;
@@ -422,6 +429,7 @@
 
     .emoji-panel button:hover{background:#222}
     .msg .html-frame{width:100%;min-height:120px;max-height:360px;border:1px solid #333;border-radius:10px;background:#0a0a0a;margin-top:6px}
+    .chat-img{max-width:min(100%,420px);height:auto;border-radius:8px;display:block;margin-top:6px;background:#111}
     .mode-tag{font-size:.68rem;color:var(--voice);padding:2px 8px;border:1px solid var(--voice);border-radius:999px}
 
     #fileInput,#folderInput{display:none}
@@ -1174,6 +1182,39 @@ function renderMarkdown(raw){
   return styleHtml+html;
 }
 
+
+function renderHtmlMessageContent(text, parent){
+  const raw=String(text||"");
+  // Fast path: pure image message — render <img> directly (no iframe), still by URL only
+  const pureImg=raw.trim().match(/^<img\b[^>]*\bsrc=["']([^"']+)["'][^>]*>\s*$/i);
+  if(pureImg){
+    const img=document.createElement("img");
+    img.className="chat-img";
+    img.src=pureImg[1];
+    img.alt="image";
+    img.referrerPolicy="no-referrer";
+    img.loading="lazy";
+    img.style.cssText="max-width:100%;height:auto;border-radius:8px;display:block;margin-top:6px";
+    img.onerror=function(){
+      const a=document.createElement("a");
+      a.href=pureImg[1]; a.target="_blank"; a.rel="noopener noreferrer";
+      a.textContent=pureImg[1];
+      a.style.cssText="word-break:break-all;color:#8ab4f8";
+      img.replaceWith(a);
+    };
+    parent.appendChild(img);
+    return;
+  }
+  const iframe=document.createElement("iframe");
+  iframe.className="html-frame";
+  iframe.setAttribute("sandbox","allow-scripts allow-forms allow-pointer-lock allow-popups allow-modals allow-fullscreen allow-presentation");
+  iframe.setAttribute("allow","fullscreen");
+  // inject referrer policy default for imgs inside
+  iframe.srcdoc='<meta name="referrer" content="no-referrer"><style>body{margin:0;background:transparent;color:#eee;font-family:system-ui,sans-serif}img{max-width:100%;height:auto;border-radius:8px}</style>'+raw;
+  parent.appendChild(iframe);
+}
+
+
 function addMessage({type="other",user,ipid,text,time,fileHtml,mid,isHtml,senderId,ts,deviceHash,lobby,fromHistory,replyTo,replyPreview,reactions}){
   if(mid&&msgStore.has(mid)&&type!=="system")return msgStore.get(mid).el;
   const div=document.createElement("div");div.className="msg "+type;if(mid)div.dataset.mid=mid;
@@ -1194,12 +1235,7 @@ function addMessage({type="other",user,ipid,text,time,fileHtml,mid,isHtml,sender
     if(text){
       const htmlMsg=!!isHtml || (typeof text==="string" && text.trimStart().startsWith("<"));
       if(htmlMsg){
-        const iframe=document.createElement("iframe");
-        iframe.className="html-frame";
-        iframe.setAttribute("sandbox","allow-scripts allow-forms allow-pointer-lock allow-popups allow-modals allow-fullscreen allow-presentation");
-        iframe.setAttribute("allow","fullscreen");
-        iframe.srcdoc=text;
-        bodyWrap.appendChild(iframe);
+        renderHtmlMessageContent(text, bodyWrap);
       } else {
         const b=document.createElement("div");
         b.className="md-body";
@@ -1285,12 +1321,7 @@ function renderMsgBody(el, text, isHtml){
   if(!wrap) return;
   wrap.innerHTML="";
   if(isHtml || (text||"").trimStart().startsWith("<")){
-    const iframe=document.createElement("iframe");
-    iframe.className="html-frame";
-    iframe.setAttribute("sandbox","allow-scripts allow-forms allow-pointer-lock allow-popups allow-modals allow-fullscreen allow-presentation");
-    iframe.setAttribute("allow","fullscreen");
-    iframe.srcdoc=text;
-    wrap.appendChild(iframe);
+    renderHtmlMessageContent(text, wrap);
   } else {
     const b=document.createElement("div");
     b.className="md-body";
@@ -1307,12 +1338,7 @@ function openMsgMenu(mid){
   // preview
   if(m.isHtml || (m.text||"").trimStart().startsWith("<")){
     els.msgPreview.innerHTML="";
-    const ifr=document.createElement("iframe");
-    ifr.className="html-frame";
-    ifr.style.minHeight="80px";
-    ifr.setAttribute("sandbox","allow-scripts allow-forms allow-fullscreen");
-    ifr.srcdoc=m.text;
-    els.msgPreview.appendChild(ifr);
+    renderHtmlMessageContent(m.text, els.msgPreview);
   } else {
     els.msgPreview.innerHTML=typeof renderMarkdown==="function"?renderMarkdown(m.text):esc(m.text);
   }
@@ -3791,13 +3817,24 @@ async function loadMemes(force){
         const d=await r.json();
         const arr=Array.isArray(d.memes)?d.memes:(d.url?[d]:[]);
         for(const m of arr){
-          if(m && m.url) items.push({
-            type:"reddit",
-            title:(m.title||"Meme").slice(0,80),
-            url:m.url,
-            thumb:m.preview && m.preview.length ? m.preview[m.preview.length-1] : m.url,
-            post:m.postLink||m.url
-          });
+          if(m && m.url){
+            const fix=u=>String(u||"").replace(/&amp;/g,"&").trim();
+            let url=fix(m.url);
+            let thumb=url;
+            if(Array.isArray(m.preview) && m.preview.length){
+              thumb=fix(m.preview[m.preview.length-1]);
+            } else if(m.nsfw===false && m.url){
+              thumb=url;
+            }
+            // skip pure video hosts without image if possible
+            items.push({
+              type:"reddit",
+              title:(m.title||"Meme").slice(0,80),
+              url:url,
+              thumb:thumb,
+              post:fix(m.postLink)||url
+            });
+          }
         }
       }
     }catch(e){ console.warn("meme-api", e); }
@@ -3837,18 +3874,27 @@ async function loadMemes(force){
 
 function sendMemeLink(meme){
   if(!meme || !meme.url) return;
-  const line="🖼️ **" + ((meme.title||"Meme").replace(/\*/g,"")) + "**\n" + meme.url;
+  const url=String(meme.url).trim();
+  if(!/^https?:\/\//i.test(url)) return;
+  const title=((meme.title||"Meme")+"").replace(/[<>&"]/g, s=>({ "<":"&lt;", ">":"&gt;", "&":"&amp;", '"':"&quot;" }[s]));
+  // HTML message — image by hotlink only (relay only sees short text, not file bytes)
+  const html='<img src="'+url.replace(/"/g,"&quot;")+'" alt="'+title+'" style="max-width:100%;height:auto;border-radius:8px;display:block" referrerpolicy="no-referrer" loading="lazy" />';
   if(els.msgInput){
-    const ta=els.msgInput;
     if(typeof htmlMode!=="undefined" && htmlMode && typeof exitHtmlMode==="function"){
       try{ exitHtmlMode(); }catch(_){}
     }
-    const cur=ta.value||"";
-    ta.value = cur ? (cur.replace(/\s+$/,"") + "\n" + line) : line;
-    try{ ta.dispatchEvent(new Event("input",{bubbles:true})); }catch(_){}
+    // force HTML path: messages starting with < use html mode in sendMessage
+    els.msgInput.value=html;
+    try{ els.msgInput.dispatchEvent(new Event("input",{bubbles:true})); }catch(_){}
   }
-  // keep modal open
+  // auto-send if in room
+  try{
+    if(connected && authed && typeof sendMessage==="function"){
+      setTimeout(function(){ sendMessage(); }, 30);
+    }
+  }catch(_){}
 }
+
 
 
 
@@ -4221,19 +4267,48 @@ function renderEmojiGrid(append){
         sec.textContent="Memes · tap to send link";
         grid.appendChild(sec);
       }
-      for(const m of list){
+            for(const m of list){
         const b=document.createElement("button");
         b.type="button";
         b.className="ep-meme";
-        b.title=(m.title||"")+"\n"+m.url;
+        b.title=(m.title||"")+"\n"+(m.url||"");
         const img=document.createElement("img");
         img.loading="lazy";
+        img.decoding="async";
         img.alt=m.title||"meme";
-        img.src=m.thumb||m.url;
-        img.onerror=()=>{ img.style.display="none"; };
+        img.referrerPolicy="no-referrer";
+        // try thumb then full url; optional blob preview on hard fail
+        const candidates=[m.thumb, m.url].filter(Boolean);
+        let ci=0;
+        const tryNext=()=>{
+          if(ci>=candidates.length){
+            // last resort: placeholder tile with title (still sendable)
+            img.removeAttribute("src");
+            img.style.display="none";
+            b.classList.add("ep-meme-noimg");
+            return;
+          }
+          const src=candidates[ci++];
+          img.onload=()=>{ img.style.display="block"; b.classList.remove("ep-meme-noimg"); };
+          img.onerror=()=>{
+            // try fetch→blob for display only (still send original URL)
+            if(src && /^https?:/i.test(src)){
+              fetch(src, {mode:"cors", referrerPolicy:"no-referrer"})
+                .then(r=>r.ok?r.blob():Promise.reject())
+                .then(blob=>{
+                  const u=URL.createObjectURL(blob);
+                  img.onload=()=>{ try{ URL.revokeObjectURL(u); }catch(_){} };
+                  img.src=u;
+                })
+                .catch(()=>tryNext());
+            } else tryNext();
+          };
+          img.src=src;
+        };
+        tryNext();
         const cap=document.createElement("div");
         cap.className="ep-meme-title";
-        cap.textContent=m.title||m.url;
+        cap.textContent=m.title||m.url||"meme";
         b.appendChild(img);
         b.appendChild(cap);
         b.onclick=ev=>{
