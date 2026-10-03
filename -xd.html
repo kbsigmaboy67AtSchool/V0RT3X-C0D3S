@@ -283,12 +283,12 @@
     #v0EmojiModal{
       display:none !important;
       position:fixed !important;
-      left:50% !important;
-      top:50% !important;
-      right:auto !important;
-      bottom:auto !important;
-      transform:translate(-50%,-50%) !important;
-      z-index:2147483000 !important;
+      left:auto;
+      top:auto;
+      right:auto;
+      bottom:auto;
+      transform:none !important;
+      z-index:5000 !important;
       width:min(400px, calc(100vw - 32px)) !important;
       height:min(480px, calc(100vh - 32px)) !important;
       max-width:none !important;
@@ -3964,7 +3964,9 @@ function closeEmojiPanel(){
   const backdrop=document.getElementById("v0EmojiBackdrop");
   if(modal){
     modal.classList.remove("on","anchored");
-    modal.style.cssText="";
+    ["left","top","right","bottom","width","height","transform"].forEach(function(prop){
+      try{ modal.style.removeProperty(prop); }catch(_){}
+    });
   }
   if(backdrop) backdrop.classList.remove("on");
   emojiPickerMode="insert";
@@ -3973,21 +3975,70 @@ function closeEmojiPanel(){
 
 
 
+
+function positionEmojiModalNearComposer(){
+  const modal=document.getElementById("v0EmojiModal");
+  if(!modal) return;
+  const pw=Math.min(400, window.innerWidth-24);
+  const ph=Math.min(480, window.innerHeight-24);
+  const anchor=
+    (els && els.msgInput) ||
+    document.querySelector(".compose") ||
+    document.querySelector(".compose-tools") ||
+    (els && els.emojiBtn) ||
+    null;
+  let left, top;
+  if(anchor && anchor.getBoundingClientRect){
+    const r=anchor.getBoundingClientRect();
+    // Prefer just above message box, right-aligned (bottom-right of chat area)
+    left=r.right - pw;
+    top=r.top - ph - 12;
+    if(top < 8){
+      // place slightly above bottom of screen near compose
+      top=Math.max(8, window.innerHeight - ph - Math.max(24, window.innerHeight - r.top + 8));
+      if(top + ph > window.innerHeight - 8) top=Math.max(8, window.innerHeight - ph - 8);
+    }
+    // If still too far left, push toward right side of viewport
+    if(left < 12) left=12;
+    if(left + pw > window.innerWidth - 12) left=window.innerWidth - pw - 12;
+    // Extra nudge ~bottom-right when compose is full-width
+    if(r.width > window.innerWidth * 0.5){
+      left=Math.max(left, window.innerWidth - pw - 20);
+    }
+  } else {
+    left=window.innerWidth - pw - 24;
+    top=window.innerHeight - ph - 100;
+  }
+  left=Math.max(8, Math.min(left, window.innerWidth - pw - 8));
+  top=Math.max(8, Math.min(top, window.innerHeight - ph - 8));
+  modal.style.setProperty("width", pw+"px", "important");
+  modal.style.setProperty("height", ph+"px", "important");
+  modal.style.setProperty("left", left+"px", "important");
+  modal.style.setProperty("top", top+"px", "important");
+  modal.style.setProperty("right", "auto", "important");
+  modal.style.setProperty("bottom", "auto", "important");
+  modal.style.setProperty("transform", "none", "important");
+}
+
 function openEmojiPanel(mode, mid){
   emojiPickerMode=mode||"insert";
   emojiReactMid=mid||null;
   const modal=getEmojiModal();
   buildEmojiPanel(true);
   const backdrop=document.getElementById("v0EmojiBackdrop");
-  if(backdrop) backdrop.classList.add("on");
-  // Always true centered modal — never bottom bar / sidebar
+  if(backdrop){
+    backdrop.classList.add("on");
+    backdrop.style.background="rgba(0,0,0,.28)";
+  }
   modal.classList.remove("anchored");
-  modal.style.cssText = ""; // clear any drag inline coords
   modal.classList.add("on");
-  setTimeout(()=>{
+  positionEmojiModalNearComposer();
+  requestAnimationFrame(function(){ positionEmojiModalNearComposer(); });
+  setTimeout(function(){
+    positionEmojiModalNearComposer();
     const s=modal.querySelector(".ep-search");
     if(s) try{ s.focus({preventScroll:true}); }catch(_){ try{s.focus();}catch(__){} }
-  }, 20);
+  }, 40);
   ensureEmojiPack().then(()=>{
     if(!modal.classList.contains("on")) return;
     if(emojiFilterCat!=="Memes"){
@@ -4331,7 +4382,8 @@ if(!window.__v0EmojiShortcut){
     else openEmojiPanel("insert", null);
   }, true);
   window.addEventListener("resize", ()=>{
-    if(els.emojiPanel && els.emojiPanel.classList.contains("on")) positionEmojiPanel();
+    var m=document.getElementById("v0EmojiModal");
+    if(m && m.classList.contains("on")) positionEmojiModalNearComposer();
   });
 }
 
